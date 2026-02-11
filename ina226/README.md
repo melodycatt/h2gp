@@ -1,5 +1,6 @@
 # a driver for the INA226 voltage an current sensor
 based on [INA226_WE](https://github.com/wollewald/INA226_WE)
+made for esp32c3, not sure if it works on others or how to make it work
 
 minimal documentation so far, but its basically the same as above
 sorry the minimal documentation is so bad i mostly copied INA226_WE and only learned about the stuff necessary for my application (so i dont understand most of the config)
