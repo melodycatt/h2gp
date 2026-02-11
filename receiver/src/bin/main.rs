@@ -164,7 +164,7 @@ fn on_receive() {
                 }
 
                 let waiter = esp_now.send(&PEER_ADDR, bytemuck::bytes_of(&*command)).expect("noooo");
-                waiter.wait();
+                waiter.wait().expect("no");
         
                 usb_serial.write(b"sent command").expect("noooo");
             }
