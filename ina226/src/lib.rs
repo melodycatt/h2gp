@@ -5,8 +5,12 @@
 // by a tiny portion i mean maybe one function
 //
 
-
-use esp_hal::{DriverMode, delay::{self, Delay}, i2c::master::{Error, I2c, I2cAddress}, time::Instant};
+use esp_hal::{
+    DriverMode,
+    delay::{self, Delay},
+    i2c::master::{Error, I2c, I2cAddress},
+    time::Instant,
+};
 
 /// number of samples to average values over (i think)
 #[derive(Clone, Copy)]
@@ -21,18 +25,18 @@ pub enum AverageMode {
     Avg1024 = 0x0E00,
 }
 
-/// conversion time in microseconds 
+/// conversion time in microseconds
 /// (dont know what this means tbh) (check the datasheet)
 #[derive(Clone, Copy)]
 pub enum ConversionTime {
-    Us140   = 0b00000000,
-    Us204   = 0b00000001,
-    Us332   = 0b00000010,
-    Us588   = 0b00000011,
-    Us1100  = 0b00000100,
-    Us2116  = 0b00000101,
-    Us4156  = 0b00000110,
-    Us8244  = 0b00000111
+    Us140 = 0b00000000,
+    Us204 = 0b00000001,
+    Us332 = 0b00000010,
+    Us588 = 0b00000011,
+    Us1100 = 0b00000100,
+    Us2116 = 0b00000101,
+    Us4156 = 0b00000110,
+    Us8244 = 0b00000111,
 }
 
 /// really dont know what this means, read the datasheet
@@ -46,20 +50,20 @@ pub enum MeasureMode {
     PowerDown2,
     ContinuousCurrentOnly,
     ContinuousBusOnly,
-    Continuous
+    Continuous,
 }
 
 /// i dont really know, i think theres some kind of alert interrupt thingy going on?
 #[derive(Clone, Copy)]
 pub enum AlertType {
-    ShuntOver    = 0x8000,
-    ShuntUnder   = 0x4000,
-    BusOver      = 0x2000,
-    BusUnder     = 0x1000,
-    PowerOver    = 0x0800,
-    CurrentOver  = 0xFFFE,
+    ShuntOver = 0x8000,
+    ShuntUnder = 0x4000,
+    BusOver = 0x2000,
+    BusUnder = 0x1000,
+    PowerOver = 0x0800,
+    CurrentOver = 0xFFFE,
     CurrentUnder = 0xFFFF,
-    None         = 0x0000
+    None = 0x0000,
 }
 
 /// INA226 driver
@@ -80,46 +84,46 @@ pub struct Ina226<'a, 'b: 'a, D: DriverMode> {
     /// not really sure how the alerts work but its on the datasheet i just didnt read it
     pub conv_alert: bool,
     /// not really sure how the alerts work but its on the datasheet i just didnt read it
-    pub limit_alert: bool
+    pub limit_alert: bool,
 }
 
 impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
     /// i2c address, im pretty sure
-    pub const ADDRESS         : u8 = 0x40;
+    pub const ADDRESS: u8 = 0x40;
     /// Configuration Register
-    pub const CONF_REG        : u8 = 0x00; 
+    pub const CONF_REG: u8 = 0x00;
     /// Shunt Voltage Register
-    pub const SHUNT_REG       : u8 = 0x01; 
+    pub const SHUNT_REG: u8 = 0x01;
     /// Bus Voltage Register
-    pub const BUS_REG         : u8 = 0x02; 
-    /// Power Register 
-    pub const PWR_REG         : u8 = 0x03; 
+    pub const BUS_REG: u8 = 0x02;
+    /// Power Register
+    pub const PWR_REG: u8 = 0x03;
     /// Current flowing through Shunt
-    pub const CURRENT_REG     : u8 = 0x04; 
-    /// Calibration Register 
-    pub const CAL_REG         : u8 = 0x05; 
-    /// Mask/Enable Register 
-    pub const MASK_EN_REG     : u8 = 0x06; 
+    pub const CURRENT_REG: u8 = 0x04;
+    /// Calibration Register
+    pub const CAL_REG: u8 = 0x05;
+    /// Mask/Enable Register
+    pub const MASK_EN_REG: u8 = 0x06;
     /// Alert Limit Register
-    pub const ALERT_LIMIT_REG : u8 = 0x07; 
+    pub const ALERT_LIMIT_REG: u8 = 0x07;
     /// Contains Unique Manbufacturer Identification Number
-    pub const MAN_ID_REG      : u8 = 0xFE; 
+    pub const MAN_ID_REG: u8 = 0xFE;
     /// Contains unique ID
-    pub const ID_REG          : u8 = 0xFF; 
+    pub const ID_REG: u8 = 0xFF;
 
-    /// Reset 
-    pub const RST       : u16 = 0x8000; 
+    /// Reset
+    pub const RST: u16 = 0x8000;
     /// Alert function flag
-    pub const AFF       : u16 = 0x0010; 
+    pub const AFF: u16 = 0x0010;
     /// Conversion ready flag
-    pub const CVRF      : u16 = 0x0008; 
+    pub const CVRF: u16 = 0x0008;
     /// Overflow flags
-    pub const OVF       : u16 = 0x0004; 
+    pub const OVF: u16 = 0x0004;
     /// Alert pin polarity - if set then active-high
-    pub const ALERT_POL : u16 = 0x0002; 
+    pub const ALERT_POL: u16 = 0x0002;
     /// Latch enable - if set then alert flag remains until mask/enable register is read
     /// if not set then flag is cleared after next conversion within limits
-    pub const LATCH_EN  : u16 = 0x0001; 
+    pub const LATCH_EN: u16 = 0x0001;
 
     /// create a new instance
     /// **IMPORTANT** this does not initialize the ina226 or set any config, you must use `Ina226::init()`
@@ -138,21 +142,18 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
             pwr_multiplier_mw: 0.625,
             overflow: false,
             conv_alert: false,
-            limit_alert: false
+            limit_alert: false,
         }
     }
 
     /// create a new instance linked to an already configured ina226
     /// syncs config
-    pub fn new_initialized(
-        wire: &'a mut I2c<'b, D>,
-        addr: u8,
-    ) -> Result<Self, Error> {
+    pub fn new_initialized(wire: &'a mut I2c<'b, D>, addr: u8) -> Result<Self, Error> {
         let mut dev = Self::new(wire, addr);
         dev.sync_from_hardware()?;
         Ok(dev)
     }
-    
+
     fn sync_from_hardware(&mut self) -> Result<(), Error> {
         // Read back config
         let conf = self.read_register(Self::CONF_REG)?;
@@ -167,7 +168,7 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
             0x0800 => AverageMode::Avg128,
             0x0A00 => AverageMode::Avg256,
             0x0C00 => AverageMode::Avg512,
-            _      => AverageMode::Avg1024,
+            _ => AverageMode::Avg1024,
         };
 
         self.conv_time = match (conf >> 3) & 0x07 {
@@ -203,11 +204,7 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
     }
 
     fn write_register(&mut self, reg: u8, val: u16) -> Result<(), Error> {
-        let bytes = [
-            reg,
-            (val >> 8) as u8,
-            (val & 0xFF) as u8
-        ];
+        let bytes = [reg, (val >> 8) as u8, (val & 0xFF) as u8];
         self.wire.write(self.i2c_address, &bytes)
     }
     fn read_register(&mut self, reg: u8) -> Result<u16, Error> {
@@ -254,7 +251,7 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
     pub fn set_correction_factor(&mut self, corr_factor: f32) -> Result<(), Error> {
         self.corr_factor = corr_factor;
         self.write_register(Self::CAL_REG, (self.cal_val as f32 * corr_factor) as u16)
-    } 
+    }
     /// see `AverageMode`
     pub fn set_average_mode(&mut self, averages: AverageMode) -> Result<(), Error> {
         self.averages = averages;
@@ -283,7 +280,11 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
     }
 
     /// not sure but i think this sets the correction value for measurements based on resistance and maximum current
-    pub fn set_resistor_range(&mut self, resistance: f32, mut current_range: f32) -> Result<(), Error> {
+    pub fn set_resistor_range(
+        &mut self,
+        resistance: f32,
+        mut current_range: f32,
+    ) -> Result<(), Error> {
         if current_range < 0. {
             current_range = 0.0819175 / resistance;
         }
@@ -293,26 +294,35 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
         self.current_divider_ma = 0.001 / current_lsb;
         self.pwr_multiplier_mw = 25000. * current_lsb;
 
-        self.write_register(Self::CAL_REG, (self.cal_val as f32 * self.corr_factor) as u16)
+        self.write_register(
+            Self::CAL_REG,
+            (self.cal_val as f32 * self.corr_factor) as u16,
+        )
     }
 
     pub fn get_shunt_voltage(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::SHUNT_REG).map(|x| x as f32 * 0.0000025 * self.corr_factor)
+        self.read_register(Self::SHUNT_REG)
+            .map(|x| x as f32 * 0.0000025 * self.corr_factor)
     }
     pub fn get_shunt_voltage_millis(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::SHUNT_REG).map(|x| x as f32 * 0.0025 * self.corr_factor)
+        self.read_register(Self::SHUNT_REG)
+            .map(|x| x as f32 * 0.0025 * self.corr_factor)
     }
     pub fn get_bus_voltage(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::BUS_REG).map(|x| x as f32 * 0.00125)
+        self.read_register(Self::BUS_REG)
+            .map(|x| x as f32 * 0.00125)
     }
     pub fn get_current_millis(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::CURRENT_REG).map(|x| x as f32 / self.current_divider_ma)
+        self.read_register(Self::CURRENT_REG)
+            .map(|x| x as f32 / self.current_divider_ma)
     }
     pub fn get_current(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::CURRENT_REG).map(|x| x as f32 / 1000. * self.current_divider_ma)
+        self.read_register(Self::CURRENT_REG)
+            .map(|x| x as f32 / 1000. * self.current_divider_ma)
     }
     pub fn get_bus_power(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::PWR_REG).map(|x| x as f32 * self.pwr_multiplier_mw)
+        self.read_register(Self::PWR_REG)
+            .map(|x| x as f32 * self.pwr_multiplier_mw)
     }
 
     /// dont know, see INA226_WE
@@ -322,7 +332,7 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
         self.write_register(Self::CONF_REG, val)?;
         let mut conv_ready = 0u16;
         let conv_start = esp_hal::time::Instant::now();
-        while conv_ready == 0 && (Instant::now() - conv_start).as_millis() < 2000  {
+        while conv_ready == 0 && (Instant::now() - conv_start).as_millis() < 2000 {
             conv_ready = self.read_register(Self::MASK_EN_REG)? & 0x0008;
         }
         Ok(())
@@ -348,14 +358,16 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
     pub fn is_busy(&mut self) -> Result<bool, Error> {
         Ok(!(self.read_register(Self::MASK_EN_REG)? & 0x0008) == 1)
     }
-    
+
     /// do this before reading values
     pub fn wait_until_conversion_completed(&mut self) -> Result<(), Error> {
         let _ = self.read_register(Self::MASK_EN_REG)?;
         let mut conv_ready = 0u16;
-        while conv_ready == 0 {{
-            conv_ready = self.read_register(Self::MASK_EN_REG)? & 0x0008;
-        }}
+        while conv_ready == 0 {
+            {
+                conv_ready = self.read_register(Self::MASK_EN_REG)? & 0x0008;
+            }
+        }
         Ok(())
     }
 
@@ -382,14 +394,14 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
             AlertType::CurrentUnder => {
                 self.alert_type = AlertType::ShuntUnder;
                 limit * 2048. * self.current_divider_ma / self.cal_val as f32
-            },
+            }
             AlertType::CurrentOver => {
                 self.alert_type = AlertType::ShuntOver;
                 limit * 2048. * self.current_divider_ma / self.cal_val as f32
-            },
+            }
             AlertType::BusOver | AlertType::BusUnder => limit * 800.,
             AlertType::PowerOver => limit / self.pwr_multiplier_mw,
-            AlertType::None => 0.
+            AlertType::None => 0.,
         };
 
         self.write_register(Self::ALERT_LIMIT_REG, alert_limit as u16)?;
@@ -403,9 +415,10 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
     /// always do this before reading measurements
     pub fn read_and_clear_flags(&mut self) -> Result<(), Error> {
         let val = self.read_register(Self::MASK_EN_REG)?;
-        self.overflow = (val & 0x0004) == 1;
-        self.conv_alert = (val & 0x0008) == 1;
-        self.limit_alert = (val & 0x0010) == 1;
+        self.overflow = (val >> 2) & 1 == 1;
+        self.conv_alert = (val >> 3) & 1 == 1;
+        self.limit_alert = (val >> 4) & 1 == 1;
         Ok(())
     }
 }
+
