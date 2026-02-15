@@ -11,16 +11,16 @@ use core::cell::RefCell;
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use bytemuck::{Pod, Zeroable};
 use critical_section::Mutex;
+use embedded_io::Write;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+use esp_hal::timer::timg::TimerGroup;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use esp_hal::{Blocking, handler, main, usb_serial_jtag};
-use esp_hal::timer::timg::TimerGroup;
 use esp_radio::esp_now::{self, EspNow, PeerInfo};
 use esp_radio::{Controller, wifi};
-use bytemuck::{Pod, Zeroable};
-use embedded_io::Write;
 use static_cell::StaticCell;
 
 #[derive(Default, Clone, Copy, Pod, Zeroable)]
@@ -29,9 +29,8 @@ struct CommandPacket {
     purge_time: u32,
     purge_interval: u32,
     fan_speed: u8,
-    _pad: [u8; 7]
+    _pad: [u8; 7],
 }
-
 
 #[derive(Default, Clone, Copy, Pod, Zeroable, Debug)]
 #[repr(C)]
@@ -59,7 +58,7 @@ extern crate alloc;
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-const PEER_ADDR: [u8; 6] = [ 0xB0, 0x81, 0x84, 0x05, 0xD6, 0xF4 ];
+const PEER_ADDR: [u8; 6] = [0xB0, 0x81, 0x84, 0x05, 0xD6, 0xF4];
 
 #[allow(
     clippy::large_stack_frames,
@@ -73,9 +72,11 @@ fn main() -> ! {
     let peripherals = esp_hal::init(config);
 
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64000);
-    
+
     let mut usb_serial = usb_serial_jtag::UsbSerialJtag::new(peripherals.USB_DEVICE);
-    usb_serial.write(b"ACCX_Avg,ACCY_Avg,ACCZ_Avg,CurrentAvg,BattV,FC_V,FC_I,UpTime,EnergyWh,HydroWh,A1_V\n");
+    usb_serial.write(
+        b"ACCX_Avg,ACCY_Avg,ACCZ_Avg,CurrentAvg,BattV,FC_V,FC_I,UpTime,EnergyWh,HydroWh,A1_V\n",
+    );
     usb_serial.set_interrupt_handler(on_receive);
     usb_serial.listen_rx_packet_recv_interrupt();
     critical_section::with(|cs| USB_SERIAL.borrow_ref_mut(cs).replace(usb_serial));
@@ -100,7 +101,7 @@ fn main() -> ! {
         peer_address: PEER_ADDR,
         lmk: None,
         channel: Some(0),
-        encrypt: false
+        encrypt: false,
     };
     esp_now.add_peer(peer_info).unwrap();
     critical_section::with(|cs| ESP_NOW.borrow_ref_mut(cs).replace(esp_now));
@@ -109,17 +110,18 @@ fn main() -> ! {
         critical_section::with(|cs| {
             let mut esp_now = ESP_NOW.borrow_ref_mut(cs);
             let mut usb_serial = USB_SERIAL.borrow_ref_mut(cs);
-            if let Some(esp_now) = esp_now.as_mut() &&
-                let Some(usb_serial) = usb_serial.as_mut() {
-                    if let Some(data) = esp_now.receive() && data.info.src_address == PEER_ADDR {
-                        let message: MessagePacket = *bytemuck::from_bytes(data.data());    
-                        usb_serial.write_fmt(format_args!("{:?}", message)).expect(":(");
-                    }
-                }
+            if let Some(esp_now) = esp_now.as_mut()
+                && let Some(usb_serial) = usb_serial.as_mut()
+                && let Some(data) = esp_now.receive()
+                && data.info.src_address == PEER_ADDR
+            {
+                let message: MessagePacket = *bytemuck::from_bytes(data.data());
+                usb_serial
+                    .write_fmt(format_args!("{:?}", message))
+                    .expect(":(");
+            }
         })
     }
-
-    // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0/examples
 }
 
 fn read_until(usb_serial: &mut UsbSerialJtag<'_, Blocking>, ch: char) -> String {
@@ -134,10 +136,16 @@ fn read_until(usb_serial: &mut UsbSerialJtag<'_, Blocking>, ch: char) -> String 
     string.iter().collect()
 }
 
-static USB_SERIAL: Mutex<RefCell<Option<UsbSerialJtag<'static, Blocking>>>> = Mutex::new(RefCell::new(None));
-static RADIO: StaticCell<Controller> = StaticCell::new();// static WIFI_CTRL: Mutex<RefCell<Option<(EspNow<'static>, Controller)>>> = Mutex::new(RefCell::new(None));
+static USB_SERIAL: Mutex<RefCell<Option<UsbSerialJtag<'static, Blocking>>>> =
+    Mutex::new(RefCell::new(None));
+static RADIO: StaticCell<Controller> = StaticCell::new(); // static WIFI_CTRL: Mutex<RefCell<Option<(EspNow<'static>, Controller)>>> = Mutex::new(RefCell::new(None));
 static ESP_NOW: Mutex<RefCell<Option<EspNow<'static>>>> = Mutex::new(RefCell::new(None));
-static COMMAND: Mutex<RefCell<CommandPacket>> = Mutex::new(RefCell::new(CommandPacket { purge_time: 200, purge_interval: 50000, fan_speed: 128, _pad: [0; 7] }));
+static COMMAND: Mutex<RefCell<CommandPacket>> = Mutex::new(RefCell::new(CommandPacket {
+    purge_time: 200,
+    purge_interval: 50000,
+    fan_speed: 128,
+    _pad: [0; 7],
+}));
 
 #[handler]
 fn on_receive() {
@@ -146,7 +154,8 @@ fn on_receive() {
         let mut esp_now = ESP_NOW.borrow_ref_mut(cs);
         let mut command = COMMAND.borrow_ref_mut(cs);
         if let Some(usb_serial) = usb_serial.as_mut()
-            && let Some(esp_now) = esp_now.as_mut() {
+            && let Some(esp_now) = esp_now.as_mut()
+        {
             let read = read_until(usb_serial, '\n');
             let line = read.trim();
             if line.starts_with("SET ") {
@@ -163,9 +172,11 @@ fn on_receive() {
                     command.fan_speed = val as u8
                 }
 
-                let waiter = esp_now.send(&PEER_ADDR, bytemuck::bytes_of(&*command)).expect("noooo");
+                let waiter = esp_now
+                    .send(&PEER_ADDR, bytemuck::bytes_of(&*command))
+                    .expect("noooo");
                 waiter.wait().expect("no");
-        
+
                 usb_serial.write(b"sent command").expect("noooo");
             }
         }
