@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![allow(clippy::empty_loop, unused)]
 #![deny(
     clippy::mem_forget,
     reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
@@ -16,7 +17,7 @@ use esp_hal::ledc::timer::{self, TimerIFace};
 use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
-use esp_hal::{Blocking, analog, gpio, ledc, main, usb_serial_jtag};
+use esp_hal::{Blocking, analog, delay, gpio, ledc, main, usb_serial_jtag};
 use esp_println::println;
 use icm42688::Icm42688;
 use ina226::Ina226;
@@ -27,7 +28,7 @@ use esp_hal::i2c;
 use esp_radio::esp_now::{self, PeerInfo};
 use esp_radio::wifi;
 
-// todo make ina226 and icm42688 libraries
+// todo me ina226 and icm42688 libraries
 // VC = voltage and current monitor
 // MG = motion + gyro monitor
 
@@ -137,7 +138,11 @@ enum Module {
 fn main() -> ! {
     esp_println::logger::init_logger_from_env();
 
-    let mut state = State::default();
+    let mut state = State {
+        purge_time: 150,
+        purge_interval: 20000,
+        ..Default::default()
+    };
     let mut peripherals = esp_hal::init(esp_hal::Config::default());
 
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64000);
@@ -151,7 +156,7 @@ fn main() -> ! {
 
     let esp_radio_ctrl = esp_radio::init().unwrap();
     let wifi = peripherals.WIFI;
-    let (mut controller, interfaces) =
+    let (mut controller, _interfaces) =
         esp_radio::wifi::new(&esp_radio_ctrl, wifi, Default::default()).unwrap();
     controller.set_mode(wifi::WifiMode::Sta).unwrap();
     controller.start().unwrap();
@@ -169,87 +174,111 @@ fn main() -> ! {
     };
     esp_now.add_peer(peer_info).unwrap();*/
 
-    let mut i2c = I2c::new(peripherals.I2C0.reborrow(), i2c::master::Config::default())
+    /////
+    ///// i2c
+    /////
+    let mut i2c = I2c::new(
+        peripherals.I2C0.reborrow(),
+        i2c::master::Config::default().with_frequency(Rate::from_hz(400_000)),
+    )
+    .unwrap_or_else(|e| {
+        usb_serial.write(b"sending\n");
+        send_error_msg(&mut usb_serial, Module::I2CInit, &e, line!());
+        loop {}
+    })
+    .with_scl(peripherals.GPIO7)
+    .with_sda(peripherals.GPIO6);
+
+    ///
+    /// fc
+    ///
+    let mut ina226 = Ina226::new(&i2c, FC_I2C_ADDR);
+    ina226.init().unwrap_or_else(|e| {
+        send_error_msg(&mut usb_serial, Module::FcVcInit, &e, line!());
+        loop {}
+    });
+    ina226.set_resistor_range(0.003, 20.).unwrap_or_else(|e| {
+        send_error_msg(&mut usb_serial, Module::FcVcInit, &e, line!());
+        loop {}
+    });
+    ina226
+        .wait_until_conversion_completed()
         .unwrap_or_else(|e| {
-            usb_serial.write(b"sending\n");
-            send_error_msg(&mut usb_serial, Module::I2CInit, &e, line!());
-            loop {}
-        })
-        .with_scl(peripherals.GPIO7)
-        .with_sda(peripherals.GPIO6);
-    usb_serial.write(b"hello\n");
-    {
-        let mut ina226 = Ina226::new(&mut i2c, FC_I2C_ADDR);
-        esp_println::println!("hello?");
-        // the write is probably erroring
-        ina226.init().unwrap_or_else(|e| {
-            usb_serial.write(b"hello\n");
-            send_error_msg(&mut usb_serial, Module::FcVcInit, &e, line!());
-        });
-        usb_serial.write(b"hello\n");
-        ina226.set_resistor_range(0.003, 20.).unwrap_or_else(|e| {
             send_error_msg(&mut usb_serial, Module::FcVcInit, &e, line!());
             loop {}
         });
-        ina226
-            .wait_until_conversion_completed()
-            .unwrap_or_else(|e| {
-                send_error_msg(&mut usb_serial, Module::FcVcInit, &e, line!());
-                loop {}
-            });
-    }
-    {
-        let mut ina226 = Ina226::new(&mut i2c, BATTERY_I2C_ADDR);
-        ina226.init().unwrap_or_else(|e| {
+
+    let mut ina226_fc = Ina226::new(&i2c, BATTERY_I2C_ADDR);
+    ina226_fc.init().unwrap_or_else(|e| {
+        send_error_msg(&mut usb_serial, Module::BatVcInit, &e, line!());
+        loop {}
+    });
+    ina226_fc
+        .set_resistor_range(0.003, 20.)
+        .unwrap_or_else(|e| {
             send_error_msg(&mut usb_serial, Module::BatVcInit, &e, line!());
             loop {}
         });
-        ina226.set_resistor_range(0.003, 20.).unwrap_or_else(|e| {
+    ina226_fc
+        .wait_until_conversion_completed()
+        .unwrap_or_else(|e| {
             send_error_msg(&mut usb_serial, Module::BatVcInit, &e, line!());
             loop {}
         });
-        ina226
-            .wait_until_conversion_completed()
-            .unwrap_or_else(|e| {
-                send_error_msg(&mut usb_serial, Module::BatVcInit, &e, line!());
-                loop {}
-            });
-    }
     usb_serial.write(b"got past ina\n");
-    {
-        let mut icm42688 = Icm42688::new(&mut i2c, 0x68);
-        icm42688.begin().unwrap_or_else(|e| {
-            send_error_msg(&mut usb_serial, Module::ImuInit, &e, line!());
-            loop {}
-        });
-    }
+
+    ///
+    /// imu
+    ///
+    let mut imu = Icm42688::new(&i2c, 0x68);
+    imu.begin().unwrap_or_else(|e| {
+        send_error_msg(&mut usb_serial, Module::ImuInit, &e, line!());
+        loop {}
+    });
+
     usb_serial.write(b"got pas icm\n");
 
-    let mut valve1 = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
+    /*let mut fan = Output::new(
+        peripherals.GPIO8.reborrow(),
+        Level::High,
+        OutputConfig::default(),
+    );*/
+    let mut valve1 = Output::new(peripherals.GPIO2, Level::High, OutputConfig::default());
     let mut valve2: Output<'_> =
-        Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());
+        Output::new(peripherals.GPIO4, Level::High, OutputConfig::default());
+    let mut delay = delay::Delay::new();
+    delay.delay_millis(1000);
+    valve1.set_low();
+    valve2.set_low();
+    /*let mut batt_led = Output::new(
+        peripherals.GPIO10.reborrow(),
+        Level::High,
+        OutputConfig::default(),
+    );
+    batt_led.set_level(Level::High);*/
 
     let mut cfg = AdcConfig::new();
-    let mut therm = cfg.enable_pin(peripherals.GPIO4, analog::adc::Attenuation::_11dB);
+    let mut therm = cfg.enable_pin(peripherals.GPIO3, analog::adc::Attenuation::_11dB);
     let mut adc = analog::adc::Adc::new(peripherals.ADC1, cfg);
 
-    let ledc = ledc::Ledc::new(peripherals.LEDC.reborrow());
+    let mut ledc = ledc::Ledc::new(peripherals.LEDC.reborrow());
+    ledc.set_global_slow_clock(ledc::LSGlobalClkSource::APBClk);
     let mut lstimer = ledc.timer(timer::Number::Timer0);
     lstimer
         .configure(timer::config::Config {
             duty: timer::config::Duty::Duty8Bit,
             clock_source: timer::LSClockSource::APBClk,
-            frequency: Rate::from_hz(5000),
+            frequency: Rate::from_khz(24),
         })
         .unwrap_or_else(|e| {
             send_error_msg(&mut usb_serial, Module::Ledc, &e, line!());
             loop {}
         });
-    let mut fan_channel = ledc.channel(channel::Number::Channel0, peripherals.GPIO20.reborrow());
+    let mut fan_channel = ledc.channel(channel::Number::Channel0, peripherals.GPIO8.reborrow());
     fan_channel
         .configure(channel::config::Config {
             timer: &lstimer,
-            duty_pct: 0,
+            duty_pct: 100,
             drive_mode: gpio::DriveMode::PushPull,
         })
         .unwrap_or_else(|e| {
@@ -261,7 +290,7 @@ fn main() -> ! {
     batt_led_channel
         .configure(channel::config::Config {
             timer: &lstimer,
-            duty_pct: 0,
+            duty_pct: 75,
             drive_mode: gpio::DriveMode::PushPull,
         })
         .unwrap_or_else(|e| {
@@ -272,7 +301,7 @@ fn main() -> ! {
     fc_led_channel
         .configure(channel::config::Config {
             timer: &lstimer,
-            duty_pct: 0,
+            duty_pct: 50,
             drive_mode: gpio::DriveMode::PushPull,
         })
         .unwrap_or_else(|e| {
@@ -286,66 +315,50 @@ fn main() -> ! {
     state.last_sample_ms = state.start_time;
     state.previous_time = state.start_time;
     state.short_previous_time = state.start_time;
+    let mut i = 0;
     loop {
-        usb_serial.write(b"loop start\n");
-        fan_channel.set_duty_hw(state.fan_speed as u32);
-        {
-            let mut imu = Icm42688::new(&mut i2c, 0x68);
-            unwrap_or_report!(imu.detect_config(), &mut usb_serial, Module::Imu);
-            unwrap_or_report!(imu.get_agt(), &mut usb_serial, Module::Imu);
-            let acc = imu.acc();
-            let gyr = imu.gyr();
-            state.message.gyr = gyr;
-            state.message.acc = acc;
-            state.message.temp = imu.temp();
-        }
+        unwrap_or_report!(imu.detect_config(), &mut usb_serial, Module::Imu);
+        unwrap_or_report!(imu.get_agt(), &mut usb_serial, Module::Imu);
+        let acc = imu.acc();
+        let gyr = imu.gyr();
+        state.message.gyr = gyr;
+        state.message.acc = acc;
+        state.message.temp = imu.temp();
         let current_time = Instant::now();
         let dt = (current_time - state.last_sample_ms.unwrap()).as_micros() as f32 / 1000.;
         state.last_sample_ms = Some(current_time);
-        {
-            let mut ina226 = unwrap_or_report!(
-                Ina226::new_initialized(&mut i2c, FC_I2C_ADDR),
-                &mut usb_serial,
-                Module::BatVc
-            );
-            let voltage =
-                unwrap_or_report!(ina226.get_bus_voltage(), &mut usb_serial, Module::BatVc);
-            let current = unwrap_or_report!(ina226.get_current(), &mut usb_serial, Module::BatVc);
-            let power = unwrap_or_report!(ina226.get_bus_power(), &mut usb_serial, Module::BatVc);
-            state.message.power = power;
-            state.message.voltage = voltage;
-            state.message.current = current;
-            if ina226.overflow {
-                println!("current overflow");
-            }
-            state.energy_wh += (voltage * current) * (dt / 3600000.);
+
+        let voltage = unwrap_or_report!(ina226.get_bus_voltage(), &mut usb_serial, Module::BatVc);
+        let current = unwrap_or_report!(ina226.get_current(), &mut usb_serial, Module::BatVc);
+        let power = unwrap_or_report!(ina226.get_bus_power(), &mut usb_serial, Module::BatVc);
+        state.message.power = power;
+        state.message.voltage = voltage;
+        state.message.current = current;
+        if ina226.overflow {
+            println!("current overflow");
         }
-        {
-            let mut ina226 = unwrap_or_report!(
-                Ina226::new_initialized(&mut i2c, FC_I2C_ADDR),
-                &mut usb_serial,
-                Module::FcVc
-            );
-            let fc_voltage =
-                unwrap_or_report!(ina226.get_bus_voltage(), &mut usb_serial, Module::FcVc);
-            let fc_current = unwrap_or_report!(ina226.get_current(), &mut usb_serial, Module::FcVc);
-            if ina226.overflow {
-                println!("current overflow on fuel cell");
-            }
-            state.message.fc_current = fc_current;
-            state.message.fc_voltage = fc_voltage;
-            state.hydro_wh += (fc_voltage * fc_current) * (dt / 3600000.);
+        state.energy_wh += (voltage * current) * (dt / 3600000.);
+
+        let fc_voltage =
+            unwrap_or_report!(ina226_fc.get_bus_voltage(), &mut usb_serial, Module::FcVc);
+        let fc_current = unwrap_or_report!(ina226_fc.get_current(), &mut usb_serial, Module::FcVc);
+        if ina226_fc.overflow {
+            println!("current overflow on fuel cell");
         }
+        state.message.fc_current = fc_current;
+        state.message.fc_voltage = fc_voltage;
+        state.hydro_wh += (fc_voltage * fc_current) * (dt / 3600000.);
+
         if state.message.battery_voltage > 1. {
-            batt_led_channel.set_duty_hw(50);
+            //batt_led_channel.set_duty_hw(50);
         } else {
-            batt_led_channel.set_duty_hw(1);
+            //batt_led_channel.set_duty_hw(1);
         }
 
         if state.message.fc_voltage > state.message.battery_voltage + 0.1 {
-            fc_led_channel.set_duty_hw(50);
+            //fc_led_channel.set_duty_hw(50);
         } else {
-            fc_led_channel.set_duty_hw(1);
+            //fc_led_channel.set_duty_hw(1);
         }
         state.message.energy_wh = state.energy_wh;
         state.message.hydro_wh = state.hydro_wh;
@@ -354,15 +367,20 @@ fn main() -> ! {
             state.purge_complete = false;
             valve1.set_high();
             valve2.set_high();
+            println!("starting purge");
             state.previous_time = Some(current_time)
         } else if purge_delta >= state.purge_time && !state.purge_complete {
+            println!("ending purge");
+
             valve1.set_low();
             valve2.set_low();
             state.purge_complete = true;
         }
-
-        let raw_therm =
-            unwrap_or_report!(adc.read_oneshot(&mut therm), &mut usb_serial, Module::Adc);
+        let raw_therm = unwrap_or_report!(
+            nb::block!(adc.read_oneshot(&mut therm)),
+            &mut usb_serial,
+            Module::Adc
+        );
         let v_out = raw_therm as f32;
         state.message.a1_voltage = v_out;
 
@@ -385,6 +403,10 @@ fn main() -> ! {
             state.purge_interval = command.purge_interval;
             state.purge_time = command.purge_time;
         }*/
+        if i % 10 == 0 {
+            println!("{i} loops done")
+        }
+        i += 1;
     }
 }
 
@@ -416,7 +438,12 @@ fn send_error_msg<E: fmt::Debug>(
     line: u32,
 ) {
     usb_serial.write(b"sending\n");
-    //usb_serial.write_fmt(format_args!("module: {:?} line: {:?} error: {:?}", module, line, err)).unwrap();
+    usb_serial
+        .write_fmt(format_args!(
+            "module: {:?} line: {:?} error: {:?}",
+            module, line, err
+        ))
+        .unwrap();
     usb_serial.write(b"sent\n");
     // [ module | line_lo | line_hi | len | utf8 bytes... ]
     /*let mut buf = [0u8; 220];
@@ -440,4 +467,3 @@ fn send_error_msg<E: fmt::Debug>(
         &buf[..4 + pos],
     );*/
 }
-

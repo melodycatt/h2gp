@@ -843,6 +843,7 @@ dependencies = [
  "icm42688",
  "ina226",
  "log",
+ "nb 1.1.0",
  "smoltcp",
 ]
 
@@ -1028,7 +1029,6 @@ version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff32365de1b6743cb203b710788263c44a03de03802daf96092f2da4fe6ba4d7"
 dependencies = [
- "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.114",

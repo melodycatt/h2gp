@@ -1,8 +1,8 @@
 [package]
-edition      = "2024"
-name         = "hydro_brain"
+edition = "2024"
+name = "hydro_brain"
 rust-version = "1.88"
-version      = "0.1.0"
+version = "0.1.0"
 
 [[bin]]
 name = "hydro_brain"
@@ -21,7 +21,7 @@ esp-rtos = { version = "0.2.0", features = [
 ] }
 
 esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32c3", "log-04"] }
-log                    = "0.4.27"
+log = "0.4.27"
 
 critical-section = "1.2.0"
 embedded-io = "0.7.1"
@@ -57,8 +57,10 @@ smoltcp = { version = "0.12.0", default-features = false, features = [
 
 ina226 = { path = "../ina226", version = "0.1.0" }
 icm42688 = { path = "../icm42688", version = "0.1.0" }
-bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
-
+bytemuck = { version = "1.25.0", default-features = false, features = [
+  "derive",
+] }
+nb = "1.1"
 
 [profile.dev]
 # Rust debug is too slow.
@@ -66,13 +68,14 @@ bytemuck = { version = "1.25.0", default-features = false, features = ["derive"]
 opt-level = "s"
 
 [profile.release]
-codegen-units    = 1     # LLVM can perform better optimizations using a single thread
-debug            = 2
+codegen-units = 1        # LLVM can perform better optimizations using a single thread
+debug = 2
 debug-assertions = false
-incremental      = false
-lto              = 'fat'
-opt-level        = 's'
-overflow-checks  = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false
 
 [target.riscv32imc-unknown-none-elf]
 runner = "espflash flash --monitor"
+
