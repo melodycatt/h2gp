@@ -1,27 +1,37 @@
 #![no_std]
 #![no_main]
-#![deny(
-    clippy::mem_forget,
-    reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
-    holding buffers for the duration of a data transfer."
-)]
 #![deny(clippy::large_stack_frames)]
+// #![deny(clippy::mem_forget)]
 
 use core::cell::RefCell;
+use core::fmt::{self, Write};
 
-use alloc::string::String;
-use alloc::vec::Vec;
 use bytemuck::{Pod, Zeroable};
 use critical_section::Mutex;
-use embedded_io::Write;
-use esp_backtrace as _;
+use embedded_io::{Read, Write as IoWrite};
 use esp_hal::clock::CpuClock;
-use esp_hal::timer::timg::TimerGroup;
+use esp_hal::delay::Delay;
+use esp_hal::efuse::Efuse;
+use esp_hal::time::Instant;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
-use esp_hal::{Blocking, handler, main, usb_serial_jtag};
-use esp_radio::esp_now::{self, EspNow, PeerInfo};
+use esp_hal::{Blocking, handler, main};
+use esp_radio::esp_now::{self, PeerInfo};
 use esp_radio::{Controller, wifi};
 use static_cell::StaticCell;
+
+const MESSAGE: u8 = 0x42;
+const PRINT: u8 = 0x41;
+
+// test
+// const PEER_ADDRS[mac_no]: [u8; 6] = [148, 169, 144, 109, 231, 180];
+// real test old
+const PEER_ADDRS: [[u8; 6]; 3] = [
+    [148, 169, 144, 122, 44, 104],
+    [148, 169, 144, 109, 231, 180],
+    [176, 129, 132, 5, 216, 100],
+];
+// old
+// const PEER_ADDRS[mac_no]: [u8; 6] = [176, 129, 132, 5, 216, 100];
 
 #[derive(Default, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
@@ -29,37 +39,101 @@ struct CommandPacket {
     purge_time: u32,
     purge_interval: u32,
     fan_speed: u8,
-    _pad: [u8; 7],
+    restart: u8,
+    mac_no: u8,
+    _pad: [u8; 5],
 }
 
 #[derive(Default, Clone, Copy, Pod, Zeroable, Debug)]
 #[repr(C)]
 struct MessagePacket {
-    // todo status message (my idea is a status code and associated byte(s) of info or someth)
     acc: [f32; 3],
     gyr: [f32; 3],
     temp: f32,
     voltage: f32,
     current: f32,
     power: f32,
+    time_since_purge: u32,
     elapsed_time: u32,
-
-    battery_voltage: f32,
     fc_voltage: f32,
     fc_current: f32,
     energy_wh: f32,
     hydro_wh: f32,
     a1_voltage: f32,
+    test_data: u32,
 }
 
-extern crate alloc;
+static USB_SERIAL: Mutex<RefCell<Option<UsbSerialJtag<'static, Blocking>>>> =
+    Mutex::new(RefCell::new(None));
+static RADIO: StaticCell<Controller> = StaticCell::new();
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
+struct BufWriter<'a> {
+    buf: &'a mut [u8],
+    pos: usize,
+}
+
+impl<'a> Write for BufWriter<'a> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let bytes = s.as_bytes();
+        let remaining = self.buf.len().saturating_sub(self.pos);
+        let n = remaining.min(bytes.len());
+        self.buf[self.pos..self.pos + n].copy_from_slice(&bytes[..n]);
+        self.pos += n;
+        Ok(())
+    }
+}
+
+macro_rules! usb_println {
+    ($($arg:tt)*) => {{
+        critical_section::with(|cs| {
+            if let Some(usb) = USB_SERIAL.borrow_ref_mut(cs).as_mut() {
+                let mut buf = [0u8; 512]; // big enough for MessagePacket debug
+                let mut writer = BufWriter { buf: &mut buf, pos: 0 };
+                let _ = writeln!(writer, $($arg)*);
+                let len = writer.pos;
+
+                usb.write(&[PRINT]).ok();
+                usb.write(&(len as u16).to_be_bytes()).ok();
+                usb.write(&buf[..len]).ok();
+                usb.flush().ok();
+            }
+        });
+    }};
+}
+
+#[handler]
+fn on_receive() {
+    usb_println!("hearing ya loud and clear cap'n!");
+    critical_section::with(|cs| {
+        usb_println!("startin the engines");
+        if let Some(usb) = USB_SERIAL.borrow_ref_mut(cs).as_mut() {
+            let mut buf = [0u8; core::mem::size_of::<CommandPacket>()];
+            usb.read_exact(&mut buf).ok();
+            let packet: &CommandPacket = bytemuck::from_bytes(&buf);
+
+            *PENDING_CMD.borrow_ref_mut(cs) = Some(*packet);
+
+            {
+                let mut buf = [0u8; 50];
+                let mut writer = BufWriter {
+                    buf: &mut buf,
+                    pos: 0,
+                };
+                let _ = writeln!(writer, "everythings happy :)");
+                let len = writer.pos;
+
+                usb.write(&[PRINT]).ok();
+                usb.write(&(len as u16).to_be_bytes()).ok();
+                usb.write(&buf[..len]).ok();
+                usb.flush().ok();
+            }
+            usb.reset_rx_packet_recv_interrupt();
+        }
+    });
+}
+static PENDING_CMD: Mutex<RefCell<Option<CommandPacket>>> = Mutex::new(RefCell::new(None));
+
 esp_bootloader_esp_idf::esp_app_desc!();
-
-const PEER_ADDR: [u8; 6] = [0xB0, 0x81, 0x84, 0x05, 0xD6, 0xF4];
-
 #[allow(
     clippy::large_stack_frames,
     reason = "it's not unusual to allocate larger buffers etc. in main"
@@ -67,25 +141,38 @@ const PEER_ADDR: [u8; 6] = [0xB0, 0x81, 0x84, 0x05, 0xD6, 0xF4];
 #[main]
 fn main() -> ! {
     esp_println::logger::init_logger_from_env();
-
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let peripherals = esp_hal::init(config);
 
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64000);
+    let delay = Delay::new();
+    delay.delay_millis(1000);
 
-    let mut usb_serial = usb_serial_jtag::UsbSerialJtag::new(peripherals.USB_DEVICE);
-    usb_serial.write(
-        b"ACCX_Avg,ACCY_Avg,ACCZ_Avg,CurrentAvg,BattV,FC_V,FC_I,UpTime,EnergyWh,HydroWh,A1_V\n",
-    );
-    usb_serial.set_interrupt_handler(on_receive);
-    usb_serial.listen_rx_packet_recv_interrupt();
-    critical_section::with(|cs| USB_SERIAL.borrow_ref_mut(cs).replace(usb_serial));
+    let mut mac_no = 0;
+    let mut usb = UsbSerialJtag::new(peripherals.USB_DEVICE);
+    usb.write(&[0x41]).unwrap();
+    usb.write(&7u16.to_be_bytes()).unwrap();
+    usb.write(b"fuck uy").unwrap();
+    usb.flush().unwrap();
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    critical_section::with(|cs| USB_SERIAL.borrow_ref_mut(cs).replace(usb));
+
+    critical_section::with(|cs| {
+        if let Some(usb) = USB_SERIAL.borrow_ref_mut(cs).as_mut() {
+            usb.set_interrupt_handler(on_receive);
+            usb.listen_rx_packet_recv_interrupt();
+        }
+    });
+    let mac_address = Efuse::mac_address();
+    usb_println!("{:?}", mac_address);
+    usb_println!("binary stuff: {:?}", b"fuck uy");
+
+    let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt =
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
-    let radio_init = RADIO.init_with(|| esp_radio::init().expect("couldnt init radio"));
+
+    let radio_init = RADIO.init_with(|| esp_radio::init().expect("cannot init radio"));
     let (mut controller, interfaces) =
         esp_radio::wifi::new(&*radio_init, peripherals.WIFI, Default::default())
             .expect("Failed to initialize Wi-Fi controller");
@@ -93,92 +180,72 @@ fn main() -> ! {
     controller.set_mode(wifi::WifiMode::Sta).unwrap();
     controller.start().unwrap();
 
-    let esp_now = interfaces.esp_now;
-    esp_now.set_channel(0).unwrap();
+    let mut esp_now = interfaces.esp_now;
+    for i in 0..3 {
+        let peer_info = PeerInfo {
+            interface: esp_now::EspNowWifiInterface::Sta,
+            peer_address: PEER_ADDRS[i],
+            lmk: None,
+            channel: Some(0),
+            encrypt: false,
+        };
+        esp_now.add_peer(peer_info).unwrap();
+    }
 
-    let peer_info = PeerInfo {
-        interface: esp_now::EspNowWifiInterface::Sta,
-        peer_address: PEER_ADDR,
-        lmk: None,
-        channel: Some(0),
-        encrypt: false,
-    };
-    esp_now.add_peer(peer_info).unwrap();
-    critical_section::with(|cs| ESP_NOW.borrow_ref_mut(cs).replace(esp_now));
+    let mut start = Instant::now();
 
     loop {
-        critical_section::with(|cs| {
-            let mut esp_now = ESP_NOW.borrow_ref_mut(cs);
-            let mut usb_serial = USB_SERIAL.borrow_ref_mut(cs);
-            if let Some(esp_now) = esp_now.as_mut()
-                && let Some(usb_serial) = usb_serial.as_mut()
-                && let Some(data) = esp_now.receive()
-                && data.info.src_address == PEER_ADDR
-            {
-                let message: MessagePacket = *bytemuck::from_bytes(data.data());
-                usb_serial
-                    .write_fmt(format_args!("{:?}", message))
-                    .expect(":(");
-            }
-        })
-    }
-}
-
-fn read_until(usb_serial: &mut UsbSerialJtag<'_, Blocking>, ch: char) -> String {
-    let mut cch: char = usb_serial.read_byte().expect("couldnt read") as char;
-    let mut string: Vec<char> = Vec::new();
-    string.push(cch);
-    while cch != ch {
-        let byte = usb_serial.read_byte().expect("couldnt read");
-        cch = byte as char;
-        string.push(cch);
-    }
-    string.iter().collect()
-}
-
-static USB_SERIAL: Mutex<RefCell<Option<UsbSerialJtag<'static, Blocking>>>> =
-    Mutex::new(RefCell::new(None));
-static RADIO: StaticCell<Controller> = StaticCell::new(); // static WIFI_CTRL: Mutex<RefCell<Option<(EspNow<'static>, Controller)>>> = Mutex::new(RefCell::new(None));
-static ESP_NOW: Mutex<RefCell<Option<EspNow<'static>>>> = Mutex::new(RefCell::new(None));
-static COMMAND: Mutex<RefCell<CommandPacket>> = Mutex::new(RefCell::new(CommandPacket {
-    purge_time: 200,
-    purge_interval: 50000,
-    fan_speed: 128,
-    _pad: [0; 7],
-}));
-
-#[handler]
-fn on_receive() {
-    critical_section::with(|cs| {
-        let mut usb_serial = USB_SERIAL.borrow_ref_mut(cs);
-        let mut esp_now = ESP_NOW.borrow_ref_mut(cs);
-        let mut command = COMMAND.borrow_ref_mut(cs);
-        if let Some(usb_serial) = usb_serial.as_mut()
-            && let Some(esp_now) = esp_now.as_mut()
+        while let Some(frame) = esp_now.receive()
+            && frame.info.src_address == PEER_ADDRS[mac_no]
+            && frame.data().len() == core::mem::size_of::<MessagePacket>()
         {
-            let read = read_until(usb_serial, '\n');
-            let line = read.trim();
-            if line.starts_with("SET ") {
-                let sp1 = line.find(" ").expect("waht");
-                let sp2 = line[(sp1 + 1)..].find(" ").expect("what");
-                let name = &line[(sp1 + 1)..sp2];
-                let val: u32 = line[(sp2 + 1)..].parse().expect(":(");
-
-                if name == "PURGE_TIME" {
-                    command.purge_time = val
-                } else if name == "PURGE_INTERVAL" {
-                    command.purge_interval = val
-                } else if name == "FAN_SPEED" {
-                    command.fan_speed = val as u8
+            let &msg: &MessagePacket = bytemuck::from_bytes(frame.data());
+            critical_section::with(|cs2| {
+                if let Some(usb) = USB_SERIAL.borrow_ref_mut(cs2).as_mut() {
+                    let len = core::mem::size_of::<MessagePacket>() as u16;
+                    usb.write(&[MESSAGE]).ok();
+                    usb.write(&len.to_be_bytes()).ok();
+                    usb.write(bytemuck::bytes_of(&msg)).ok();
+                    usb.flush().ok();
                 }
-
-                let waiter = esp_now
-                    .send(&PEER_ADDR, bytemuck::bytes_of(&*command))
-                    .expect("noooo");
-                waiter.wait().expect("no");
-
-                usb_serial.write(b"sent command").expect("noooo");
-            }
+            });
         }
-    })
+
+        if let Some(waiter) = critical_section::with(|cs| {
+            if let Some(cmd) = PENDING_CMD.borrow_ref_mut(cs).take() {
+                if cmd.mac_no != 0 {
+                    mac_no = cmd.mac_no as usize - 1;
+                    None
+                } else if let Ok(waiter) =
+                    esp_now.send(&PEER_ADDRS[mac_no], bytemuck::bytes_of(&cmd))
+                {
+                    usb_println!("sending");
+                    Some(waiter)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }) {
+            waiter.wait().unwrap();
+            usb_println!("sent");
+        }
+
+        if start.elapsed().as_secs() >= 1 {
+            start = Instant::now();
+            usb_println!("Receiver alive");
+        }
+
+        delay.delay_millis(1);
+    }
+}
+
+use core::panic::PanicInfo;
+
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    usb_println!("PANIC: {}", info);
+
+    loop {}
 }
