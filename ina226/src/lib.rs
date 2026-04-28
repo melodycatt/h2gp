@@ -5,6 +5,8 @@
 // by a tiny portion i mean maybe one function
 //
 
+use core::marker::PhantomData;
+
 use esp_hal::{
     DriverMode,
     delay::{self, Delay},
@@ -67,8 +69,12 @@ pub enum AlertType {
 }
 
 /// INA226 driver
-pub struct Ina226<'a, 'b: 'a, D: DriverMode> {
-    wire: &'a mut I2c<'b, D>,
+/// preferably have a clock speed from 1..400khz
+/// unless in high speed mode but idk how to enable it so contribute to the library if you want
+/// that
+pub struct Ina226<'b, D: DriverMode> {
+    wire: *mut I2c<'b, D>,
+    _phantom: PhantomData<&'b ()>,
     averages: AverageMode,
     conv_time: ConversionTime,
     measure_mode: MeasureMode,
@@ -87,7 +93,7 @@ pub struct Ina226<'a, 'b: 'a, D: DriverMode> {
     pub limit_alert: bool,
 }
 
-impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
+impl<'b, D: DriverMode> Ina226<'b, D> {
     /// i2c address, im pretty sure
     pub const ADDRESS: u8 = 0x40;
     /// Configuration Register
@@ -125,13 +131,18 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
     /// if not set then flag is cleared after next conversion within limits
     pub const LATCH_EN: u16 = 0x0001;
 
+    #[allow(clippy::mut_from_ref)]
+    fn i2c(&self) -> &mut I2c<'b, D> {
+        unsafe { &mut *self.wire }
+    }
     /// create a new instance
     /// **IMPORTANT** this does not initialize the ina226 or set any config, you must use `Ina226::init()`
-    pub fn new(wire: &'a mut I2c<'b, D>, addr: u8) -> Self {
+    pub fn new(wire: &'b I2c<'b, D>, addr: u8) -> Self {
         Self {
-            wire,
+            wire: wire as *const _ as *mut I2c<'b, D>,
+            _phantom: PhantomData,
             i2c_address: I2cAddress::SevenBit(addr),
-            averages: AverageMode::Avg1,
+            averages: AverageMode::Avg4,
             conv_time: ConversionTime::Us1100,
             measure_mode: MeasureMode::Continuous,
             alert_type: AlertType::None,
@@ -146,9 +157,10 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
         }
     }
 
+    /// shouldnt be needed? but it doesnt matter
     /// create a new instance linked to an already configured ina226
     /// syncs config
-    pub fn new_initialized(wire: &'a mut I2c<'b, D>, addr: u8) -> Result<Self, Error> {
+    pub fn new_initialized(wire: &'b I2c<'b, D>, addr: u8) -> Result<Self, Error> {
         let mut dev = Self::new(wire, addr);
         dev.sync_from_hardware()?;
         Ok(dev)
@@ -205,23 +217,20 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
 
     fn write_register(&mut self, reg: u8, val: u16) -> Result<(), Error> {
         let bytes = [reg, (val >> 8) as u8, (val & 0xFF) as u8];
-        self.wire.write(self.i2c_address, &bytes)
+        self.i2c().write(self.i2c_address, &bytes)
     }
     fn read_register(&mut self, reg: u8) -> Result<u16, Error> {
         let mut buf = [0u8, 0u8];
-        self.wire.write_read(self.i2c_address, &[reg], &mut buf)?;
+        self.i2c().write_read(self.i2c_address, &[reg], &mut buf)?;
         Ok(((buf[0] as u16) << 8) + buf[1] as u16)
     }
 
     /// initialize ina226 with current config
     pub fn init(&mut self) -> Result<(), Error> {
-        esp_println::println!("hello?");
         let delay = delay::Delay::new();
-        delay.delay_millis(1000);
-        esp_println::println!("hello? 1");
-        delay.delay_millis(1000);
 
         self.reset_ic()?;
+        delay.delay_millis(1000);
         self.write_register(Self::CAL_REG, 2048)?;
         let mut current_config = self.read_register(Self::CONF_REG)?;
         current_config &= !(0x0E00);
@@ -237,13 +246,10 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
 
     /// reset
     pub fn reset_ic(&mut self) -> Result<(), Error> {
-        esp_println::println!("reset ic?");
-        let delay = delay::Delay::new();
-        delay.delay_millis(1000);
+        //esp_println::println!("resetting ina226");
         self.write_register(Self::CONF_REG, Self::RST)?;
-        esp_println::println!("reset ic");
 
-        delay.delay_millis(1000);
+        //delay.delay_millis(1000);
         Ok(())
     }
 
@@ -301,24 +307,29 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
     }
 
     pub fn get_shunt_voltage(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::SHUNT_REG)
-            .map(|x| x as f32 * 0.0000025 * self.corr_factor)
+        let val = self.read_register(Self::SHUNT_REG)? as i16;
+        Ok(val as f32 * 0.0000025 * self.corr_factor)
+        // self.read_register(Self::SHUNT_REG)
+        //     .map(|x| x as f32 * 0.0000025 * self.corr_factor)
     }
     pub fn get_shunt_voltage_millis(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::SHUNT_REG)
-            .map(|x| x as f32 * 0.0025 * self.corr_factor)
+        let val = self.read_register(Self::SHUNT_REG)? as i16;
+        Ok(val as f32 * 0.0025 * self.corr_factor)
+        // self.read_register(Self::SHUNT_REG)
+        //     .map(|x| x as f32 * 0.0025 * self.corr_factor)
     }
     pub fn get_bus_voltage(&mut self) -> Result<f32, Error> {
         self.read_register(Self::BUS_REG)
             .map(|x| x as f32 * 0.00125)
     }
     pub fn get_current_millis(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::CURRENT_REG)
-            .map(|x| x as f32 / self.current_divider_ma)
+        let val = self.read_register(Self::CURRENT_REG)? as i16;
+        Ok(val as f32 / self.current_divider_ma)
+        // self.read_register(Self::CURRENT_REG)
+        //     .map(|x| x as f32 / self.current_divider_ma)
     }
     pub fn get_current(&mut self) -> Result<f32, Error> {
-        self.read_register(Self::CURRENT_REG)
-            .map(|x| x as f32 / 1000. * self.current_divider_ma)
+        Ok(self.get_current_millis()? / 1000.)
     }
     pub fn get_bus_power(&mut self) -> Result<f32, Error> {
         self.read_register(Self::PWR_REG)
@@ -356,7 +367,7 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
     }
 
     pub fn is_busy(&mut self) -> Result<bool, Error> {
-        Ok(!(self.read_register(Self::MASK_EN_REG)? & 0x0008) == 1)
+        Ok((self.read_register(Self::MASK_EN_REG)? & 0x0008) == 0)
     }
 
     /// do this before reading values
@@ -421,4 +432,3 @@ impl<'a, 'b: 'a, D: DriverMode> Ina226<'a, 'b, D> {
         Ok(())
     }
 }
-
