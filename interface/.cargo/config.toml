@@ -1,4 +1,4 @@
 [build]
 target = "aarch64-apple-darwin"
-# [check]
-# target = "aarch64-apple-darwin"
+[check]
+target = "aarch64-apple-darwin"

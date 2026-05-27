@@ -7,19 +7,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use eframe::egui::{self, Stroke};
+use eframe::egui::{self, Stroke, Ui};
 use egui_plot::{Line, Plot, PlotPoints};
 use interface::*;
 
-const MESSAGE: u8 = 0x42;
-const PRINT: u8 = 0x41;
+const MESSAGE: u8 = 0x01;
+const PRINT: u8 = 0x0;
 
 const HISTORY: usize = 500;
 
-// TODO: swappable mac addr
-
 #[allow(dead_code)]
 struct App {
+    ctrl: ControlPacket,
     // shared_msg: Arc<Mutex<(MessagePacket, Vec<String>)>>,
     log_rx: crossbeam::channel::Receiver<String>,
     msg_rx: crossbeam::channel::Receiver<MessagePacket>,
@@ -49,6 +48,9 @@ struct App {
     ben: bool,
     fcen: bool,
     log: Vec<String>,
+    count: usize,
+    long_term: Vec<MessagePacket>,
+    long_graphs: bool,
 }
 
 impl eframe::App for App {
@@ -58,6 +60,11 @@ impl eframe::App for App {
         let msgs = self.msg_rx.try_iter().map(|mut msg| {
             [msg.acc[1], msg.acc[2]] = [msg.acc[2], -msg.acc[1]];
             msg.gyr = msg.gyr.map(|x| x * PI / 180.);
+            self.count += 1;
+            if self.count == 35 {
+                self.count = 0;
+                self.long_term.push(msg.clone());
+            }
             msg
         });
         self.log.extend(self.log_rx.try_iter());
@@ -67,7 +74,8 @@ impl eframe::App for App {
 
         self.message_history.extend(msgs);
         if self.message_history.len() > HISTORY {
-            self.message_history.drain(..HISTORY);
+            self.message_history
+                .drain(..(self.message_history.len() - HISTORY));
         }
         let msg = self.message_history.back().unwrap();
 
@@ -149,6 +157,11 @@ impl eframe::App for App {
                     ui.add_space(-10.);
                     ui.label("log")
                 });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.long_graphs, "");
+                    ui.add_space(-10.);
+                    ui.label("long term graphs")
+                });
 
                 // println!("{}", ui.min_size().x)
                 // })
@@ -193,114 +206,58 @@ impl eframe::App for App {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.style_mut().visuals.override_text_color = Some(self.colors.text);
-            ui.columns(2, |ui| {
-                Plot::new("voltage")
-                    // .height(500.)
-                    .view_aspect(1.75)
-                    .allow_scroll(false)
-                    .allow_zoom(false)
-                    .allow_drag(false)
-                    .y_axis_label("voltage")
-                    .allow_axis_zoom_drag(false)
-                    .show(&mut ui[0], |plot_ui| {
-                        plot_ui.line(
-                            Line::new(
-                                "battery",
-                                PlotPoints::from_iter(
-                                    self.message_history
-                                        .iter()
-                                        .enumerate()
-                                        .map(|x| [x.0 as f64, x.1.voltage as f64]),
-                                ),
-                            )
-                            .color(self.colors.accent),
-                        );
-                        plot_ui.line(
-                            Line::new(
-                                "fuel cell",
-                                PlotPoints::from_iter(
-                                    self.message_history
-                                        .iter()
-                                        .enumerate()
-                                        .map(|x| [x.0 as f64, x.1.fc_voltage as f64]),
-                                ),
-                            )
-                            .color(self.colors.accent_xl),
-                        );
-                    });
-
-                Plot::new("fc data")
-                    .view_aspect(1.75)
-                    .allow_scroll(false)
-                    .allow_zoom(false)
-                    .allow_drag(false)
-                    .y_axis_label("current")
-                    .allow_axis_zoom_drag(false)
-                    .show(&mut ui[1], |plot_ui| {
-                        plot_ui.line(
-                            Line::new(
-                                "battery",
-                                PlotPoints::from_iter(
-                                    self.message_history
-                                        .iter()
-                                        .enumerate()
-                                        .map(|x| [x.0 as f64, x.1.current as f64]),
-                                ),
-                            )
-                            .color(self.colors.accent),
-                        );
-                        plot_ui.line(
-                            Line::new(
-                                "fuel cell",
-                                PlotPoints::from_iter(
-                                    self.message_history
-                                        .iter()
-                                        .enumerate()
-                                        .map(|x| [x.0 as f64, x.1.fc_current as f64]),
-                                ),
-                            )
-                            .color(self.colors.accent_xl),
-                        );
-                    });
-            });
-            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.allocate_ui(egui::Vec2::new(ui.available_width() * 0.5, 0.), |ui| {
-                    Plot::new("temp")
-                        .view_aspect(1.75)
-                        .allow_scroll(false)
-                        .allow_zoom(false)
-                        .allow_drag(false)
-                        .y_axis_label("temperature")
-                        .allow_axis_zoom_drag(false)
-                        .show(ui, |plot_ui| {
-                            plot_ui.line(
-                                Line::new(
-                                    "fuel cell",
-                                    PlotPoints::from_iter(
-                                        self.message_history
-                                            .iter()
-                                            .enumerate()
-                                            .map(|x| [x.0 as f64, x.1.a1_voltage as f64]),
-                                    ),
-                                )
-                                .color(self.colors.accent_xl),
-                            );
-                            plot_ui.line(
-                                Line::new(
-                                    "imu",
-                                    PlotPoints::from_iter(
-                                        self.message_history
-                                            .iter()
-                                            .enumerate()
-                                            .map(|x| [x.0 as f64, x.1.temp as f64]),
-                                    ),
-                                )
-                                .color(self.colors.accent),
-                            );
-                        });
-                })
-            });
+            if self.long_graphs {
+                graphs_long(self, ui)
+            } else {
+                graphs(self, ui);
+            }
         });
+
+        // ctx.input(|z| {
+        // if z.key_released(egui::Key::ArrowUp) {
+        //     self.ctrl.forward = 10.;
+        //     if let Ok(mut port) = self.port.lock() {
+        //         port.write_all(&[1]);
+        //         let _ = port.write_all(bytemuck::bytes_of(&self.ctrl));
+        //     }
+        // }
+        // if z.key_released(egui::Key::ArrowDown) {
+        //     self.ctrl.forward = 10.;
+        //     if let Ok(mut port) = self.port.lock() {
+        //         port.write_all(&[1]);
+        //         let _ = port.write_all(bytemuck::bytes_of(&self.ctrl));
+        //     }
+        // }
+        // if z.key_pressed(egui::Key::ArrowUp) {
+        //     self.ctrl.forward = 90.;
+        //     if let Ok(mut port) = self.port.lock() {
+        //         port.write_all(&[1]);
+        //         let _ = port.write_all(bytemuck::bytes_of(&self.ctrl));
+        //     }
+        // }
+        // if z.key_pressed(egui::Key::ArrowDown) {
+        //     self.ctrl.forward = 0.;
+        //     if let Ok(mut port) = self.port.lock() {
+        //         port.write_all(&[1]);
+        //         let _ = port.write_all(bytemuck::bytes_of(&self.ctrl));
+        //     }
+        // }
+        // if z.key_pressed(egui::Key::ArrowRight) {
+        //     self.ctrl.steer = 75.;
+        //     if let Ok(mut port) = self.port.lock() {
+        //         port.write_all(&[1]);
+        //         let _ = port.write_all(bytemuck::bytes_of(&self.ctrl));
+        //     }
+        // }
+        // if z.key_pressed(egui::Key::ArrowLeft) {
+        //     self.ctrl.steer = 25.;
+        //     if let Ok(mut port) = self.port.lock() {
+        //         port.write_all(&[1]);
+        //         let _ = port.write_all(bytemuck::bytes_of(&self.ctrl));
+        //     }
+        // }
+        // });
+
         if self.commands_visible {
             egui::Window::new("command & control")
                 .resizable(false)
@@ -342,6 +299,7 @@ impl eframe::App for App {
                         self.cpckt.mac_no = 0;
 
                         if let Ok(mut port) = self.port.lock() {
+                            port.write_all(&[0]);
                             let _ = port.write_all(bytemuck::bytes_of(&self.cpckt));
                         }
                     }
@@ -352,6 +310,7 @@ impl eframe::App for App {
                         self.cpckt.mac_no = 0;
 
                         if let Ok(mut port) = self.port.lock() {
+                            port.write_all(&[0]);
                             let _ = port.write_all(bytemuck::bytes_of(&self.cpckt));
                         }
                     }
@@ -365,6 +324,7 @@ impl eframe::App for App {
                     if ui.button("connect").clicked() {
                         self.cpckt.restart = 0;
                         if let Ok(mut port) = self.port.lock() {
+                            port.write_all(&[0]);
                             let _ = port.write_all(bytemuck::bytes_of(&self.cpckt));
                         }
                     }
@@ -387,13 +347,14 @@ fn main() -> eframe::Result<()> {
     };
 
     let mut raw_port = serialport::new(ppath, 115_200)
-        .timeout(Duration::from_millis(1000))
+        .timeout(Duration::from_millis(10000))
         .open()
         .unwrap();
 
     raw_port.clear(serialport::ClearBuffer::All).unwrap();
     raw_port.write_data_terminal_ready(false).unwrap();
     raw_port.write_data_terminal_ready(true).unwrap();
+    // thread::sleep(Duration::from_secs(1));
 
     let port = Arc::new(Mutex::new(raw_port));
     let (msg_tx, msg_rx) = crossbeam::channel::unbounded();
@@ -413,11 +374,11 @@ fn main() -> eframe::Result<()> {
             loop {
                 if let Ok(mut port) = port.lock() {
                     while port.bytes_to_read().unwrap() > 0 {
-                        let mut header = [0; 3];
+                        let mut header = [0; 4];
                         port.read_exact(&mut header).expect("buh");
-                        match header[0] {
-                            MESSAGE => {
-                                let s = u16::from_be_bytes(header[1..3].try_into().unwrap());
+                        match header[0..2] {
+                            [MESSAGE, MESSAGE] => {
+                                let s = u16::from_be_bytes(header[2..4].try_into().unwrap());
                                 if s != std::mem::size_of::<MessagePacket>() as u16 {
                                     panic!("wrong size")
                                 }
@@ -426,10 +387,15 @@ fn main() -> eframe::Result<()> {
                                 let message: MessagePacket =
                                     bytemuck::from_bytes::<MessagePacket>(&data).clone();
                                 msg_tx.send(message).unwrap();
-                                println!("{:?}", message);
                             }
-                            PRINT => {
-                                let len = u16::from_be_bytes(header[1..3].try_into().unwrap());
+                            [PRINT, PRINT] => {
+                                println!("{header:?}");
+                                let len = u16::from_be_bytes(header[2..4].try_into().unwrap());
+                                if len > 300 {
+                                    println!("{len}");
+                                    println!("discarding");
+                                    continue;
+                                }
                                 let mut buf = vec![0; len as usize];
                                 port.read_exact(&mut buf).ok();
                                 log_tx
@@ -481,7 +447,11 @@ fn main() -> eframe::Result<()> {
             let miku = cc
                 .egui_ctx
                 .load_texture("miku", color_image, Default::default());
+            let mut message_history = VecDeque::new();
+            message_history.push_back(MessagePacket::default());
             let app = App {
+                ctrl: ControlPacket::default(),
+                long_graphs: false,
                 // shared_msg,
                 msg_rx,
                 log_rx,
@@ -493,8 +463,8 @@ fn main() -> eframe::Result<()> {
                     mac_no: 0,
                     _pad: [0; 5],
                 },
-                mac_no: 1,
-                message_history: VecDeque::new(),
+                mac_no: 3,
+                message_history,
                 start: Instant::now(),
                 port,
                 lap_count: 0,
@@ -502,7 +472,7 @@ fn main() -> eframe::Result<()> {
                 texture,
                 motion_mode: false,
                 commands_visible: true,
-                log_visible: false,
+                log_visible: true,
                 colors: Colors::REDBACK,
                 miku_mode: false,
                 miku,
@@ -510,9 +480,229 @@ fn main() -> eframe::Result<()> {
                 last_millis: 0,
                 ben: true,
                 fcen: true,
+                long_term: Vec::new(),
                 log: Vec::new(),
+                count: 0,
             };
             Ok(Box::new(app))
         }),
     )
+}
+fn graphs_long(app: &mut App, ui: &mut Ui) {
+    ui.columns(2, |ui| {
+        Plot::new("voltage")
+            // .height(500.)
+            .view_aspect(1.75)
+            .allow_scroll(false)
+            .allow_zoom(false)
+            .allow_drag(false)
+            .y_axis_label("voltage")
+            .allow_axis_zoom_drag(false)
+            .show(&mut ui[0], |plot_ui| {
+                plot_ui.line(
+                    Line::new(
+                        "battery",
+                        PlotPoints::from_iter(
+                            app.long_term
+                                .iter()
+                                .enumerate()
+                                .map(|x| [x.0 as f64, x.1.voltage as f64]),
+                        ),
+                    )
+                    .color(app.colors.accent),
+                );
+                plot_ui.line(
+                    Line::new(
+                        "fuel cell",
+                        PlotPoints::from_iter(
+                            app.long_term
+                                .iter()
+                                .enumerate()
+                                .map(|x| [x.0 as f64, x.1.fc_voltage as f64]),
+                        ),
+                    )
+                    .color(app.colors.accent_xl),
+                );
+            });
+
+        Plot::new("fc data")
+            .view_aspect(1.75)
+            .allow_scroll(false)
+            .allow_zoom(false)
+            .allow_drag(false)
+            .y_axis_label("current")
+            .allow_axis_zoom_drag(false)
+            .show(&mut ui[1], |plot_ui| {
+                plot_ui.line(
+                    Line::new(
+                        "battery",
+                        PlotPoints::from_iter(
+                            app.long_term
+                                .iter()
+                                .enumerate()
+                                .map(|x| [x.0 as f64, x.1.current as f64]),
+                        ),
+                    )
+                    .color(app.colors.accent),
+                );
+                plot_ui.line(
+                    Line::new(
+                        "fuel cell",
+                        PlotPoints::from_iter(
+                            app.long_term
+                                .iter()
+                                .enumerate()
+                                .map(|x| [x.0 as f64, x.1.fc_current as f64]),
+                        ),
+                    )
+                    .color(app.colors.accent_xl),
+                );
+            });
+    });
+    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+        ui.allocate_ui(egui::Vec2::new(ui.available_width() * 0.5, 0.), |ui| {
+            Plot::new("temp")
+                .view_aspect(1.75)
+                .allow_scroll(false)
+                .allow_zoom(false)
+                .allow_drag(false)
+                .y_axis_label("temperature")
+                .allow_axis_zoom_drag(false)
+                .show(ui, |plot_ui| {
+                    plot_ui.line(
+                        Line::new(
+                            "fuel cell",
+                            PlotPoints::from_iter(
+                                app.long_term
+                                    .iter()
+                                    .enumerate()
+                                    .map(|x| [x.0 as f64, x.1.a1_voltage as f64]),
+                            ),
+                        )
+                        .color(app.colors.accent_xl),
+                    );
+                    plot_ui.line(
+                        Line::new(
+                            "imu",
+                            PlotPoints::from_iter(
+                                app.long_term
+                                    .iter()
+                                    .enumerate()
+                                    .map(|x| [x.0 as f64, x.1.temp as f64]),
+                            ),
+                        )
+                        .color(app.colors.accent),
+                    );
+                });
+        })
+    });
+}
+fn graphs(app: &mut App, ui: &mut Ui) {
+    ui.columns(2, |ui| {
+        Plot::new("voltage")
+            // .height(500.)
+            .view_aspect(1.75)
+            .allow_scroll(false)
+            .allow_zoom(false)
+            .allow_drag(false)
+            .y_axis_label("voltage")
+            .allow_axis_zoom_drag(false)
+            .show(&mut ui[0], |plot_ui| {
+                plot_ui.line(
+                    Line::new(
+                        "battery",
+                        PlotPoints::from_iter(
+                            app.message_history
+                                .iter()
+                                .enumerate()
+                                .map(|x| [x.0 as f64, x.1.voltage as f64]),
+                        ),
+                    )
+                    .color(app.colors.accent),
+                );
+                plot_ui.line(
+                    Line::new(
+                        "fuel cell",
+                        PlotPoints::from_iter(
+                            app.message_history
+                                .iter()
+                                .enumerate()
+                                .map(|x| [x.0 as f64, x.1.fc_voltage as f64]),
+                        ),
+                    )
+                    .color(app.colors.accent_xl),
+                );
+            });
+
+        Plot::new("fc data")
+            .view_aspect(1.75)
+            .allow_scroll(false)
+            .allow_zoom(false)
+            .allow_drag(false)
+            .y_axis_label("current")
+            .allow_axis_zoom_drag(false)
+            .show(&mut ui[1], |plot_ui| {
+                plot_ui.line(
+                    Line::new(
+                        "battery",
+                        PlotPoints::from_iter(
+                            app.message_history
+                                .iter()
+                                .enumerate()
+                                .map(|x| [x.0 as f64, x.1.current as f64]),
+                        ),
+                    )
+                    .color(app.colors.accent),
+                );
+                plot_ui.line(
+                    Line::new(
+                        "fuel cell",
+                        PlotPoints::from_iter(
+                            app.message_history
+                                .iter()
+                                .enumerate()
+                                .map(|x| [x.0 as f64, x.1.fc_current as f64]),
+                        ),
+                    )
+                    .color(app.colors.accent_xl),
+                );
+            });
+    });
+    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+        ui.allocate_ui(egui::Vec2::new(ui.available_width() * 0.5, 0.), |ui| {
+            Plot::new("temp")
+                .view_aspect(1.75)
+                .allow_scroll(false)
+                .allow_zoom(false)
+                .allow_drag(false)
+                .y_axis_label("temperature")
+                .allow_axis_zoom_drag(false)
+                .show(ui, |plot_ui| {
+                    plot_ui.line(
+                        Line::new(
+                            "fuel cell",
+                            PlotPoints::from_iter(
+                                app.message_history
+                                    .iter()
+                                    .enumerate()
+                                    .map(|x| [x.0 as f64, x.1.a1_voltage as f64]),
+                            ),
+                        )
+                        .color(app.colors.accent_xl),
+                    );
+                    plot_ui.line(
+                        Line::new(
+                            "imu",
+                            PlotPoints::from_iter(
+                                app.message_history
+                                    .iter()
+                                    .enumerate()
+                                    .map(|x| [x.0 as f64, x.1.temp as f64]),
+                            ),
+                        )
+                        .color(app.colors.accent),
+                    );
+                });
+        })
+    });
 }

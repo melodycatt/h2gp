@@ -8,19 +8,21 @@ pub struct MessagePacket {
     pub acc: [f32; 3],
     pub gyr: [f32; 3],
     pub temp: f32,
+    pub time_since_purge: u32,
+    pub elapsed_time: u32,
     pub voltage: f32,
     pub current: f32,
     pub power: f32,
-    pub time_since_purge: u32,
-    pub elapsed_time: u32,
     pub fc_voltage: f32,
     pub fc_current: f32,
+    pub batt_flags: u16,
+    pub fc_flags: u16,
     pub energy_wh: f32,
     pub hydro_wh: f32,
     pub a1_voltage: f32,
-    test_data: u32,
+    pub free_heap: u32,
+    pub test_data: u32,
 }
-
 #[derive(Default, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 pub struct CommandPacket {
@@ -204,10 +206,10 @@ pub fn show_log(
     log: &[String],
 ) {
     egui::SidePanel::right("log")
-        .resizable(false)
+        .resizable(true)
         .show(ctx, |ui| {
             let text_xl = hex("#e8f2ff");
-            ui.set_width(250.);
+            // ui.set_width(250.);
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             ui.style_mut().visuals.widgets.noninteractive.fg_stroke =
                 egui::Stroke::new(1.0, text_xl);
@@ -393,4 +395,11 @@ pub fn apply_theme(ctx: &egui::Context, colors: Colors) {
     visuals.window_corner_radius = 0.0.into();
     setup_custom_fonts(ctx);
     ctx.set_visuals(visuals);
+}
+// TODO: swappable mac addr
+#[derive(Default, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+pub struct ControlPacket {
+    pub forward: f32,
+    pub steer: f32,
 }
