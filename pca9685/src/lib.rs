@@ -10,7 +10,7 @@
 
 use core::marker::PhantomData;
 
-use esp_hal::DriverMode;
+use esp_hal::{DriverMode, i2c};
 // use esp_hal::delay::DelayNs;
 use esp_hal::delay::Delay;
 use esp_hal::i2c::master::I2c;
@@ -67,7 +67,7 @@ pub enum OutputMode {
 pub struct ServoDriver<'b, D: DriverMode> {
     i2c: *mut I2c<'b, D>,
     i2c_owned: PhantomData<&'b ()>,
-    i2caddr: u8,
+    pub i2caddr: u8,
     oscillator_freq: u32,
     pub pwm_freq: f32,
 }
@@ -105,56 +105,58 @@ impl<'b, D: DriverMode> ServoDriver<'b, D> {
     /// If `prescale` is non-zero, the chip is configured to use that prescale
     /// value as an external clock prescaler. Otherwise the default frequency is
     /// set to 1000 Hz.
-    pub fn begin(&mut self, prescale: u8) -> bool {
+    pub fn begin(&mut self, prescale: u8) -> Result<(), Error> {
         if self.i2c.is_null() {
-            return false;
+            return Err(Error::NullI2c);
         }
 
-        self.reset();
+        self.reset()?;
         self.set_oscillator_frequency(FREQUENCY_OSCILLATOR);
 
         if prescale != 0 {
-            self.set_ext_clk(prescale);
+            self.set_ext_clk(prescale)?;
         } else {
-            self.set_pwm_freq(1000.0);
+            self.set_pwm_freq(50.0)?;
         }
 
-        true
+        Ok(())
     }
 
     /// Sends a reset command to the PCA9685 chip over I2C.
-    pub fn reset(&mut self) {
-        self.write8(PCA9685_MODE1, MODE1_RESTART);
+    pub fn reset(&mut self) -> Result<(), Error> {
+        self.write8(PCA9685_MODE1, MODE1_RESTART | MODE1_AI)?;
         Self::delay_ms(10);
+        Ok(())
     }
 
     /// Puts board into sleep mode.
-    pub fn sleep(&mut self) {
-        let awake = self.read8(PCA9685_MODE1);
+    pub fn sleep(&mut self) -> Result<(), Error> {
+        let awake = self.read8(PCA9685_MODE1)?;
         let sleep = awake | MODE1_SLEEP;
-        self.write8(PCA9685_MODE1, sleep);
+        self.write8(PCA9685_MODE1, sleep)?;
         Self::delay_ms(5);
+        Ok(())
     }
 
     /// Wakes board from sleep.
-    pub fn wakeup(&mut self) {
-        let sleep = self.read8(PCA9685_MODE1);
+    pub fn wakeup(&mut self) -> Result<(), Error> {
+        let sleep = self.read8(PCA9685_MODE1)?;
         let wakeup = sleep & !MODE1_SLEEP;
-        self.write8(PCA9685_MODE1, wakeup);
+        self.write8(PCA9685_MODE1, wakeup)
     }
 
     /// Sets EXTCLK pin to use the external clock.
-    pub fn set_ext_clk(&mut self, prescale: u8) {
-        let oldmode = self.read8(PCA9685_MODE1);
+    pub fn set_ext_clk(&mut self, prescale: u8) -> Result<(), Error> {
+        let oldmode = self.read8(PCA9685_MODE1)?;
         let mut newmode = (oldmode & !MODE1_RESTART) | MODE1_SLEEP;
-        self.write8(PCA9685_MODE1, newmode);
+        self.write8(PCA9685_MODE1, newmode)?;
 
         // This sets both the SLEEP and EXTCLK bits of MODE1 to switch to the
         // external clock.
         newmode |= MODE1_EXTCLK;
-        self.write8(PCA9685_MODE1, newmode);
+        self.write8(PCA9685_MODE1, newmode)?;
 
-        self.write8(PCA9685_PRESCALE, prescale);
+        self.write8(PCA9685_PRESCALE, prescale)?;
 
         Self::delay_ms(5);
 
@@ -162,56 +164,59 @@ impl<'b, D: DriverMode> ServoDriver<'b, D> {
         self.write8(
             PCA9685_MODE1,
             (newmode & !MODE1_SLEEP) | MODE1_RESTART | MODE1_AI,
-        );
+        )
     }
 
-    /// Sets the PWM frequency for the entire chip, up to ~1.6 KHz.
-    pub fn set_pwm_freq(&mut self, mut freq: f32) {
+    pub fn set_pwm_freq(&mut self, mut freq: f32) -> Result<(), Error> {
+        if self.oscillator_freq == 0 {
+            self.oscillator_freq = FREQUENCY_OSCILLATOR;
+        }
+
         if freq < 1.0 {
             freq = 1.0;
         }
         if freq > 3500.0 {
             freq = 3500.0;
         }
+
         self.pwm_freq = freq;
 
         let mut prescaleval = ((self.oscillator_freq as f32 / (freq * 4096.0)) + 0.5) - 1.0;
-
         if prescaleval < PCA9685_PRESCALE_MIN as f32 {
             prescaleval = PCA9685_PRESCALE_MIN as f32;
         }
         if prescaleval > PCA9685_PRESCALE_MAX as f32 {
             prescaleval = PCA9685_PRESCALE_MAX as f32;
         }
-
         let prescale = prescaleval as u8;
 
-        let oldmode = self.read8(PCA9685_MODE1);
-        let newmode = (oldmode & !MODE1_RESTART) | MODE1_SLEEP;
+        let oldmode = self.read8(PCA9685_MODE1)?;
+        let sleepmode = (oldmode & !MODE1_RESTART) | MODE1_SLEEP;
 
-        self.write8(PCA9685_MODE1, newmode);
-        self.write8(PCA9685_PRESCALE, prescale);
-        self.write8(PCA9685_MODE1, oldmode);
+        self.write8(PCA9685_MODE1, sleepmode)?;
+        self.write8(PCA9685_PRESCALE, prescale)?;
+        self.write8(
+            PCA9685_MODE1,
+            (sleepmode & !MODE1_SLEEP) | MODE1_RESTART | MODE1_AI,
+        )?;
+        Self::delay_ms(1);
 
-        Self::delay_ms(5);
-
-        // Turn on auto-increment and restart, just like the original C++ code.
-        self.write8(PCA9685_MODE1, oldmode | MODE1_RESTART | MODE1_AI);
+        Ok(())
     }
 
     /// Sets the output mode of the PCA9685 to either open drain or totem pole.
-    pub fn set_output_mode(&mut self, mode: OutputMode) {
-        let oldmode = self.read8(PCA9685_MODE2);
+    pub fn set_output_mode(&mut self, mode: OutputMode) -> Result<(), Error> {
+        let oldmode = self.read8(PCA9685_MODE2)?;
         let newmode = if mode == OutputMode::TotemPole {
             oldmode | MODE2_OUTDRV
         } else {
             oldmode & !MODE2_OUTDRV
         };
-        self.write8(PCA9685_MODE2, newmode);
+        self.write8(PCA9685_MODE2, newmode)
     }
 
     /// Reads set Prescale from PCA9685.
-    pub fn read_prescale(&mut self) -> u8 {
+    pub fn read_prescale(&mut self) -> Result<u8, Error> {
         self.read8(PCA9685_PRESCALE)
     }
 
@@ -235,57 +240,61 @@ impl<'b, D: DriverMode> ServoDriver<'b, D> {
     /// Sets the PWM output of one of the PCA9685 pins.
     ///
     /// Returns `0` if successful, otherwise `1`.
-    pub fn set_pwm(&mut self, num: u8, on: u16, off: u16) -> u8 {
+    pub fn set_pwm(&mut self, num: u8, on: u16, off: u16) -> Result<(), Error> {
+        if num >= 16 {
+            return Ok(());
+        }
+
+        if self.i2c.is_null() {
+            return Err(Error::NullI2c);
+        }
+
         let buffer = [
-            PCA9685_LED0_ON_L.wrapping_add(4 * num),
-            on as u8,
+            PCA9685_LED0_ON_L + 4 * num,
+            (on & 0xFF) as u8,
             (on >> 8) as u8,
-            off as u8,
+            (off & 0xFF) as u8,
             (off >> 8) as u8,
         ];
 
-        if self.i2c.is_null() {
-            return 1;
-        }
-
-        let result = self.i2c_mut().write(self.i2caddr, &buffer);
-        if result.is_ok() { 0 } else { 1 }
+        self.i2c_mut().write(self.i2caddr, &buffer)?;
+        Ok(())
     }
 
     /// Helper to set pin PWM output.
     ///
     /// Sets pin without dealing with on/off tick placement and properly handles
     /// a zero value as completely off and 4095 as completely on.
-    pub fn set_pin(&mut self, num: u8, mut val: u16, invert: bool) {
+    pub fn set_pin(&mut self, num: u8, mut val: u16, invert: bool) -> Result<(), Error> {
         if val > 4095 {
             val = 4095;
         }
 
         if invert {
             if val == 0 {
-                self.set_pwm(num, 4096, 0);
+                self.set_pwm(num, 4096, 0)
             } else if val == 4095 {
-                self.set_pwm(num, 0, 4096);
+                self.set_pwm(num, 0, 4096)
             } else {
-                self.set_pwm(num, 0, 4095 - val);
+                self.set_pwm(num, 0, 4095 - val)
             }
         } else if val == 4095 {
-            self.set_pwm(num, 4096, 0);
+            self.set_pwm(num, 4096, 0)
         } else if val == 0 {
-            self.set_pwm(num, 0, 4096);
+            self.set_pwm(num, 0, 4096)
         } else {
-            self.set_pwm(num, 0, val);
+            self.set_pwm(num, 0, val)
         }
     }
 
     /// Sets the PWM output of one of the PCA9685 pins based on input microseconds.
     ///
     /// The output is not precise, matching the original implementation.
-    pub fn write_microseconds(&mut self, num: u8, microseconds: u16) {
+    pub fn write_microseconds(&mut self, num: u8, microseconds: u16) -> Result<(), Error> {
         let pulse = microseconds as f64;
 
         // Read prescale.
-        let mut prescale = self.read_prescale() as u16;
+        let mut prescale = self.read_prescale()? as u16;
 
         // Calculate pulse length for PWM based on the datasheet formula.
         prescale += 1;
@@ -294,7 +303,7 @@ impl<'b, D: DriverMode> ServoDriver<'b, D> {
         pulselength /= self.oscillator_freq as f64;
 
         let pulse = pulse / pulselength;
-        self.set_pwm(num, 0, pulse as u16);
+        self.set_pwm(num, 0, pulse as u16)
     }
 
     /// Getter for the internally tracked oscillator used for frequency calculations.
@@ -307,25 +316,28 @@ impl<'b, D: DriverMode> ServoDriver<'b, D> {
         self.oscillator_freq = freq;
     }
 
+    #[must_use]
     /// Reads a single PCA9685 register through the I2C driver.
-    fn read8(&mut self, addr: u8) -> u8 {
+    fn read8(&mut self, addr: u8) -> Result<u8, Error> {
         let mut out = [0u8; 1];
         if self.i2c.is_null() {
-            return 0;
+            return Err(Error::NullI2c);
         }
 
-        let _ = self.i2c_mut().write_read(self.i2caddr, &[addr], &mut out);
-        out[0]
+        self.i2c_mut().write_read(self.i2caddr, &[addr], &mut out)?;
+        Ok(out[0])
     }
 
+    #[must_use]
     /// Writes a single PCA9685 register through the I2C driver.
-    fn write8(&mut self, addr: u8, d: u8) {
+    fn write8(&mut self, addr: u8, d: u8) -> Result<(), Error> {
         if self.i2c.is_null() {
-            return;
+            return Err(Error::NullI2c);
         }
 
         let buf = [addr, d];
-        let _ = self.i2c_mut().write(self.i2caddr, &buf);
+        self.i2c_mut().write(self.i2caddr, &buf)?;
+        Ok(())
     }
 
     /// Delays for a number of milliseconds using esp-hal's blocking delay type.
@@ -339,8 +351,32 @@ impl<'b, D: DriverMode> ServoDriver<'b, D> {
     ///
     /// This is unsafe because the caller must guarantee the I2C driver remains
     /// valid and uniquely borrowed for the lifetime of this object.
-    fn i2c_mut(&self) -> &mut I2c<'b, D> {
+    pub fn i2c_mut(&self) -> &mut I2c<'b, D> {
         unsafe { &mut *self.i2c }
+    }
+
+    pub fn scan_i2c(i2c: &mut I2c<'b, D>) -> heapless::Vec<u8, 128> {
+        let mut found = heapless::Vec::<u8, 128>::new();
+
+        // Valid 7-bit I2C address range (skip reserved ranges if you want)
+        for addr in 0x03..=0x77 {
+            // Zero-length write is commonly used for probing
+            if i2c.write(addr, &[]).is_ok() {
+                let _ = found.push(addr);
+            }
+        }
+
+        found
     }
 }
 
+#[derive(Debug)]
+pub enum Error {
+    I2c(i2c::master::Error),
+    NullI2c,
+}
+impl From<i2c::master::Error> for Error {
+    fn from(value: i2c::master::Error) -> Self {
+        Error::I2c(value)
+    }
+}
