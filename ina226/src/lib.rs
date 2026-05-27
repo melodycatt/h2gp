@@ -424,11 +424,11 @@ impl<'b, D: DriverMode> Ina226<'b, D> {
     }
 
     /// always do this before reading measurements
-    pub fn read_and_clear_flags(&mut self) -> Result<(), Error> {
+    pub fn read_and_clear_flags(&mut self) -> Result<u16, Error> {
         let val = self.read_register(Self::MASK_EN_REG)?;
         self.overflow = (val >> 2) & 1 == 1;
         self.conv_alert = (val >> 3) & 1 == 1;
         self.limit_alert = (val >> 4) & 1 == 1;
-        Ok(())
+        Ok(val)
     }
 }
