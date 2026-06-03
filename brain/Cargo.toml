@@ -4,6 +4,7 @@ name = "hydro_brain"
 rust-version = "1.88"
 version = "0.1.0"
 
+
 [[bin]]
 name = "hydro_brain"
 path = "./src/bin/main.rs"
@@ -55,12 +56,14 @@ smoltcp = { version = "0.12.0", default-features = false, features = [
   "socket-udp",
 ] }
 
+pca9685 = { path = "../pca9685", version = "0.1.0" }
 ina226 = { path = "../ina226", version = "0.1.0" }
 icm42688 = { path = "../icm42688", version = "0.1.0" }
 bytemuck = { version = "1.25.0", default-features = false, features = [
   "derive",
 ] }
 nb = "1.1"
+libm = "0.2.16"
 
 [profile.dev]
 # Rust debug is too slow.
@@ -75,7 +78,3 @@ incremental = false
 lto = 'fat'
 opt-level = 's'
 overflow-checks = false
-
-[target.riscv32imc-unknown-none-elf]
-runner = "espflash flash --monitor"
-
