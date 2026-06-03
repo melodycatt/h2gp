@@ -1,0 +1,9 @@
+# Set the layout for the current tab
+layout tall
+# Set the working directory for windows in the current tab
+cd ~/hydrogp/
+# Create the "main" window and run an editor in it to edit the project files
+launch --title "nvimmm" /usr/bin/nvim
+# Create a side window to run a shell to build or test project
+launch --title "teehaaeeehlaalala"
+# Create another side window to keep an eye on some useful log file
