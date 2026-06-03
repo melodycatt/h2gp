@@ -2,6 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use eframe::egui::{self, Color32, Context, Pos2, Response, Sense, Stroke, Ui, Vec2};
 mod fonts;
 pub use fonts::*;
+pub mod config;
 #[derive(Default, Clone, Copy, Pod, Zeroable, Debug)]
 #[repr(C)]
 pub struct MessagePacket {

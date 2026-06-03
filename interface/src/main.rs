@@ -1,7 +1,9 @@
 use std::{
     collections::VecDeque,
+    env,
     f32::consts::PI,
     io::{Read, Write},
+    path::Path,
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
@@ -63,7 +65,7 @@ impl eframe::App for App {
             self.count += 1;
             if self.count == 35 {
                 self.count = 0;
-                self.long_term.push(msg.clone());
+                self.long_term.push(msg);
             }
             msg
         });
@@ -118,7 +120,7 @@ impl eframe::App for App {
                         )
                         .clicked()
                     {
-                        apply_theme(ctx, col.clone());
+                        apply_theme(ctx, col);
                         self.colors = col;
                         self.miku_mode = !self.miku_mode;
                     }
@@ -299,7 +301,7 @@ impl eframe::App for App {
                         self.cpckt.mac_no = 0;
 
                         if let Ok(mut port) = self.port.lock() {
-                            port.write_all(&[0]);
+                            let _ = port.write_all(&[0]);
                             let _ = port.write_all(bytemuck::bytes_of(&self.cpckt));
                         }
                     }
@@ -310,21 +312,21 @@ impl eframe::App for App {
                         self.cpckt.mac_no = 0;
 
                         if let Ok(mut port) = self.port.lock() {
-                            port.write_all(&[0]);
+                            let _ = port.write_all(&[0]);
                             let _ = port.write_all(bytemuck::bytes_of(&self.cpckt));
                         }
                     }
-                    if ui.button("restart receiver").clicked() {
-                        if let Ok(mut port) = self.port.lock() {
-                            port.write_data_terminal_ready(false).unwrap();
-                            thread::sleep(Duration::from_millis(100));
-                            port.write_data_terminal_ready(true).unwrap();
-                        }
+                    if ui.button("restart receiver").clicked()
+                        && let Ok(mut port) = self.port.lock()
+                    {
+                        port.write_data_terminal_ready(false).unwrap();
+                        thread::sleep(Duration::from_millis(100));
+                        port.write_data_terminal_ready(true).unwrap();
                     }
                     if ui.button("connect").clicked() {
                         self.cpckt.restart = 0;
                         if let Ok(mut port) = self.port.lock() {
-                            port.write_all(&[0]);
+                            let _ = port.write_all(&[0]);
                             let _ = port.write_all(bytemuck::bytes_of(&self.cpckt));
                         }
                     }
@@ -337,16 +339,15 @@ impl eframe::App for App {
 
 // #[unsafe(no_mangle)]
 fn main() -> eframe::Result<()> {
-    const PORT_PATH: &str = "/dev/tty.usbmodem1101";
-    let args: Vec<String> = std::env::args().collect();
-    let ppath = if args.len() > 1 {
-        println!("{:?}", &args[1]);
-        &args[1]
-    } else {
-        PORT_PATH
-    };
+    let path = env::current_dir()
+        .unwrap()
+        // .parent()
+        // .unwrap()
+        .join("config.toml");
+    println!("{path:?}");
+    let conf = config::load_from(path);
 
-    let mut raw_port = serialport::new(ppath, 115_200)
+    let mut raw_port = serialport::new(conf.port, 115_200)
         .timeout(Duration::from_millis(10000))
         .open()
         .unwrap();
@@ -385,7 +386,7 @@ fn main() -> eframe::Result<()> {
                                 let mut data = [0; std::mem::size_of::<MessagePacket>()];
                                 port.read_exact(&mut data).unwrap();
                                 let message: MessagePacket =
-                                    bytemuck::from_bytes::<MessagePacket>(&data).clone();
+                                    *bytemuck::from_bytes::<MessagePacket>(&data);
                                 msg_tx.send(message).unwrap();
                             }
                             [PRINT, PRINT] => {
@@ -460,10 +461,10 @@ fn main() -> eframe::Result<()> {
                     purge_interval: 20_000,
                     fan_speed: 0,
                     restart: 0,
-                    mac_no: 0,
+                    mac_no: conf.default_addr,
                     _pad: [0; 5],
                 },
-                mac_no: 3,
+                mac_no: conf.default_addr,
                 message_history,
                 start: Instant::now(),
                 port,
