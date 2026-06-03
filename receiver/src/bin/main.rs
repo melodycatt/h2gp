@@ -25,11 +25,14 @@ const PRINT: u8 = 0x00;
 // test
 // const PEER_ADDRS[mac_no]: [u8; 6] = [148, 169, 144, 109, 231, 180];
 // real test old
-const PEER_ADDRS: [[u8; 6]; 3] = [
-    [148, 169, 144, 122, 44, 104],
-    [148, 169, 144, 109, 231, 180],
-    [148, 169, 144, 106, 157, 104],
-];
+include!(concat!(env!("OUT_DIR"), "/known_macs.rs"));
+
+// KNOWN_MACS is now available as [[u8; 6]; N] with the exact count baked in
+// const PEER_ADDRS: [[u8; 6]; 3] = [
+//     [148, 169, 144, 122, 44, 104],
+//     [148, 169, 144, 109, 231, 180],
+//     [148, 169, 144, 106, 157, 104],
+// ];
 // old
 // const PEER_ADDRS[mac_no]: [u8; 6] = [176, 129, 132, 5, 216, 100];
 

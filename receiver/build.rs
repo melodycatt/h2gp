@@ -1,4 +1,5 @@
 fn main() {
+    macs();
     linker_be_nice();
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
@@ -67,4 +68,33 @@ fn linker_be_nice() {
         "cargo:rustc-link-arg=--error-handling-script={}",
         std::env::current_exe().unwrap().display()
     );
+}
+use std::{env, fs, path::Path};
+
+fn macs() {
+    let macs_path = "../brain_macs.txt";
+
+    // Re-run if the file changes
+    println!("cargo:rerun-if-changed={macs_path}");
+
+    let contents = fs::read_to_string(macs_path).unwrap_or_default();
+
+    let entries: Vec<String> = contents
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            let bytes: Vec<&str> = line.trim().split(',').collect();
+            assert!(bytes.len() == 6, "bad line in macs.txt: {line}");
+            bytes.join(", ").to_string()
+        })
+        .collect();
+
+    let count = entries.len();
+    let array_body = entries.join(",\n    ");
+
+    let code = format!("pub const PEER_ADDRS: [[u8; 6]; {count}] = [\n    {array_body}\n];\n");
+
+    let out_dir = env::var("OUT_DIR").unwrap();
+    let dest = Path::new(&out_dir).join("known_macs.rs");
+    fs::write(dest, code).expect("failed to write known_macs.rs");
 }
