@@ -22,20 +22,25 @@ macOS has some really stingy security rules so youll probably get a popup saying
 xattr -rd com.apple.quarantine
 ```
 then drag the folder you downloaded (make sure its unzipped) into the terminal. make sure there is a space between "com.apple.quarantine" and the path that gets copied into the terminal. it should look something like `xattr -rd com.apple.quarantine /Users/<your name>/Downloads/interface/`. now press enter and this should remove the restrictions on the app.
-currently, the app wont open if the receiver isnt plugged in. by default, it expects it to be plugged into **usb-c port 2** (the one closest to you). you can change this by changing the config.toml value to `port = 1`, meaning it should be plugged into usb-c port 1
+currently, the app wont open if the receiver isnt plugged in. by default, it expects it to be plugged into **usb-c port 2** (~~the one closest to you~~ turns out, this changes between mac versions, meaning it could be either of the ports! its best to just try both). you can change this by changing the config.toml value to `port = 1`, meaning it should be plugged into usb-c port 1
 ### windows:
 windows *also* has stingy security rules, except i dont have a windows laptop so i dont know how to get around them! basically just look it up or ask chatgpt if you cant download or run the app
 **it will not work out of the box**. i will write a prompt for chatgpt to figure out how to get it to work if i remember. if not just send it the contents of `config.toml` and ask it how to find the equivalent of `/dev/tty.usbmodem101` for your windows laptop for an esp32 jtag serial and what to replace port with to get it to work (tell it it should be a string path)
 
 ## how to use it
-the receiver will not be connected to the brain on startup. just click the connect button on the commands panel. by default this connects to brain 3, which you can change in the config.toml file with `default_addr`. while the app is running you can connect to a different brain with the input in the log section, then click the connect button
+the receiver will not be connected to the brain on startup. just click the connect button on the commands panel. by default this connects to brain 3, which you can change in the config.toml file with `default_addr`. while the app is running you can switch to a different brain with the "brain #" input, then click the connect button
+the brains have labels on them for numbers. registering a new brain is annoying but i can help if thats needed.
+the brain then needs to be connected to the receiver. in the commands panel, there are two receiver numbers, because the brain can send to to receivers at once. if a receiver channel is set to 0, then the brain wont send anything for it, otherwise it should be set to the number on the label of the receiver. if youre only using one receiver, you should set one channel to 0. you have to click send command to apply this
+the send wait checkbox tells the brain whether to wait for the receivers to receive the data before continuing. this should usually be enabled, but if youre getting lag issues disabling this may help. it could cause other issues like packet loss though, idk. best to leave it on.
+
+
 every floating window/panel can be dragged around
 the graphs show:
 1. the voltage of the battery and fuel cell. you can hover over them to see which is which
 2. the current of the battery and fuel cell. they should be vaguely opposite, with the battery fluctuating as you drive. hover to see which is which
 3. temperature values:
-  a) thermistor readings. this is in millivolts it think so it will be in the thousands. and i dont know how to convert it to degrees so its mostly useless. dont really worry about it
-  b) brain temperature in ºC. just as useless because who cares about the brain getting hot. unless its REALLY hot. because the thermistor is in the thousands the graph will be scalled so you can barely tell what the temperature is. just hover over the line
+  a) ~~thermistor readings. this is in millivolts it think so it will be in the thousands. and i dont know how to convert it to degrees so its mostly useless. dont really worry about it~~ removed
+  b) brain temperature in ºC. just as useless because who cares about the brain getting hot. unless its REALLY hot. ~~because the thermistor is in the thousands the graph will be scalled so you can barely tell what the temperature is. just hover over the line~~
 
 there are checkboxes on the logo window thing:
 - motion shows the acceleration and gyro data, mostly useless
