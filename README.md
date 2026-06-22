@@ -3,11 +3,13 @@ download the pre-compiled app for your platform from the [releases](https://gith
 ## how to know which one to download
 ### mac:
 click the apple icon in the top left, click about this mac:
+
 <img width="287" height="490" alt="Screenshot 2026-06-04 at 8 43 45 am" src="https://github.com/user-attachments/assets/c08e8ded-c89e-42b1-becb-e4cdb52f57a0" />
 - if the text i highlighted says "Apple M_" then you should download the arm64-apple one
 - if it says intel or basically anything other than the first option, its probably the x86_64-apple one. if it doesnt work try the arm64-apple one
 ### windows:
 go to `Settings > System > About` and look at System Type:
+
 <img width="750" height="576" alt="image" src="https://github.com/user-attachments/assets/99e24e38-5463-4714-b531-383ddb48d151" />
 - if it says x86 or x64 in the highlighted text, download the x86_64-windows one
 - if it says ARM64 or ARM or AARCH64 or something similar to those then download the arm64-windows one
@@ -17,11 +19,17 @@ if youre on linux why is your school computer on linux. idiot
 ## how to run it
 all versions come with the actual app and `config.toml`. config.toml contains some minimal config that you probably dont need to touch. ill get to that later
 ### mac:
-macOS has some really stingy security rules so youll probably get a popup saying that it cant verify the app isnt malware. if you do, open terminal (Cmd+Space then type terminal) and type this into it:
-```
-xattr -rd com.apple.quarantine
-```
-then drag the folder you downloaded (make sure its unzipped) into the terminal. make sure there is a space between "com.apple.quarantine" and the path that gets copied into the terminal. it should look something like `xattr -rd com.apple.quarantine /Users/<your name>/Downloads/interface/`. now press enter and this should remove the restrictions on the app.
+open the dmg file and drag the app out of it, probably into the Applications folder (idk if that makes a difference)
+macOS has some really stingy security rules so youll probably get a popup saying that it cant verify the app isnt malware. if you do, theres two ways to fix it:
+1. go to settings > security & privacy, scroll to the bottom and you should see this:\
+  <img width="476" height="180" alt="Screenshot 2026-06-23 at 9 48 37 am" src="https://github.com/user-attachments/assets/83200a52-3f01-41bd-ac1c-3e11d9047632" />\
+  click open anyway. itll probably ask for your password or fingerprint or whatever
+2. open terminal (Cmd+Space then type terminal) and type this into it:
+   ```
+   xattr -rd com.apple.quarantine
+   ```
+   then drag the folder you downloaded (make sure its unzipped) into the terminal. make sure there is a space between "com.apple.quarantine" and the path that gets copied into the terminal\
+   it should look something like `xattr -rd com.apple.quarantine /Users/<your name>/Applications/H2GP.app/`. now press enter and this should remove the restrictions on the app.
 
 currently, the app wont open if the receiver isnt plugged in. by default, it expects it to be plugged into **usb-c port 2** (~~the one closest to you~~ turns out, this changes between mac versions, meaning it could be either of the ports! its best to just try both). you can change this by changing the config.toml value to `port = 1`, meaning it should be plugged into usb-c port 1
 ### windows:
@@ -58,7 +66,7 @@ there are checkboxes on the logo window thing:
 this will show raw data, which can be useful for trouble shooting. you can also see a regular 'receiver alive' message to be sure its still alive. if the receiver crashes, youll see a `PANIC:` message in the log. if you know how to code you can fix it and make a pull request, if you dont make an issue on the issues tab at the top of this page and paste the panic message. i might get to it if i see it.
 
 if the brain crashes you *might* see a different kind of panic message but idk its weird. just restart the brain if you see a panic message but the receivers still alive i think
-if the bain stops responding to messages and sending data but its still alive, check if the 'free_heap' value in the raw data is less than like, 10,000. if it is just restart everything. probably restart everything anyway.
+if the brain stops responding to messages and sending data but its still alive, check if the 'free_heap' value in the raw data is less than like, 10,000. if it is just restart everything. probably restart everything anyway.
 
 ## troubleshooting
 if the app stops responding, buttons stop working, you cant restart the receiver or something like that:
