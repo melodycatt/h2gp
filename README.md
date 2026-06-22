@@ -22,19 +22,25 @@ macOS has some really stingy security rules so youll probably get a popup saying
 xattr -rd com.apple.quarantine
 ```
 then drag the folder you downloaded (make sure its unzipped) into the terminal. make sure there is a space between "com.apple.quarantine" and the path that gets copied into the terminal. it should look something like `xattr -rd com.apple.quarantine /Users/<your name>/Downloads/interface/`. now press enter and this should remove the restrictions on the app.
+
 currently, the app wont open if the receiver isnt plugged in. by default, it expects it to be plugged into **usb-c port 2** (~~the one closest to you~~ turns out, this changes between mac versions, meaning it could be either of the ports! its best to just try both). you can change this by changing the config.toml value to `port = 1`, meaning it should be plugged into usb-c port 1
 ### windows:
 windows *also* has stingy security rules, except i dont have a windows laptop so i dont know how to get around them! basically just look it up or ask chatgpt if you cant download or run the app
+
 **it will not work out of the box**. i will write a prompt for chatgpt to figure out how to get it to work if i remember. if not just send it the contents of `config.toml` and ask it how to find the equivalent of `/dev/tty.usbmodem101` for your windows laptop for an esp32 jtag serial and what to replace port with to get it to work (tell it it should be a string path)
 
 ## how to use it
 the receiver will not be connected to the brain on startup. just click the connect button on the commands panel. by default this connects to brain 3, which you can change in the config.toml file with `default_addr`. while the app is running you can switch to a different brain with the "brain #" input, then click the connect button
+
 the brains have labels on them for numbers. registering a new brain is annoying but i can help if thats needed.
+
 the brain then needs to be connected to the receiver. in the commands panel, there are two receiver numbers, because the brain can send to to receivers at once. if a receiver channel is set to 0, then the brain wont send anything for it, otherwise it should be set to the number on the label of the receiver. if youre only using one receiver, you should set one channel to 0. you have to click send command to apply this
+
 the send wait checkbox tells the brain whether to wait for the receivers to receive the data before continuing. this should usually be enabled, but if youre getting lag issues disabling this may help. it could cause other issues like packet loss though, idk. best to leave it on.
 
 
 every floating window/panel can be dragged around
+
 the graphs show:
 1. the voltage of the battery and fuel cell. you can hover over them to see which is which
 2. the current of the battery and fuel cell. they should be vaguely opposite, with the battery fluctuating as you drive. hover to see which is which
@@ -50,6 +56,7 @@ there are checkboxes on the logo window thing:
 
 ### log
 this will show raw data, which can be useful for trouble shooting. you can also see a regular 'receiver alive' message to be sure its still alive. if the receiver crashes, youll see a `PANIC:` message in the log. if you know how to code you can fix it and make a pull request, if you dont make an issue on the issues tab at the top of this page and paste the panic message. i might get to it if i see it.
+
 if the brain crashes you *might* see a different kind of panic message but idk its weird. just restart the brain if you see a panic message but the receivers still alive i think
 if the bain stops responding to messages and sending data but its still alive, check if the 'free_heap' value in the raw data is less than like, 10,000. if it is just restart everything. probably restart everything anyway.
 
@@ -70,6 +77,7 @@ if the app stops responding, buttons stop working, you cant restart the receiver
 this is all billy harris-nevill's old code i copied off of. it was terrible and made with chatgpt. be glad you dont have to deal with it
 ### random letters and numbers
 these are drivers for different ICs on the board that i ported to rust. you can ignore them really, and i didn't bother to document them very well :b
+
 for your interest:
 - ina226 = voltage and current sensor
 - icm42688 = motion sensor (accel + gyro)
