@@ -8,7 +8,7 @@ click the apple icon in the top left, click about this mac:
 
 - if the text i highlighted says "Apple M_" then you should download the arm64-apple one
 - if it says intel or basically anything other than the first option, its probably the x86_64-apple one. if it doesnt work try the arm64-apple one
-- 
+
 ### windows:
 go to `Settings > System > About` and look at System Type:
 
