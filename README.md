@@ -5,8 +5,10 @@ download the pre-compiled app for your platform from the [releases](https://gith
 click the apple icon in the top left, click about this mac:
 
 <img width="287" height="490" alt="Screenshot 2026-06-04 at 8 43 45 am" src="https://github.com/user-attachments/assets/c08e8ded-c89e-42b1-becb-e4cdb52f57a0" />
+
 - if the text i highlighted says "Apple M_" then you should download the arm64-apple one
 - if it says intel or basically anything other than the first option, its probably the x86_64-apple one. if it doesnt work try the arm64-apple one
+- 
 ### windows:
 go to `Settings > System > About` and look at System Type:
 
