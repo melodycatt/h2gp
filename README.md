@@ -13,6 +13,7 @@ click the apple icon in the top left, click about this mac:
 go to `Settings > System > About` and look at System Type:
 
 <img width="750" height="576" alt="image" src="https://github.com/user-attachments/assets/99e24e38-5463-4714-b531-383ddb48d151" />
+
 - if it says x86 or x64 in the highlighted text, download the x86_64-windows one
 - if it says ARM64 or ARM or AARCH64 or something similar to those then download the arm64-windows one
 
