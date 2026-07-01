@@ -9,6 +9,9 @@
 - battey indicator
 - auto connect/handshake packet :p
 - broadcast scanny thing? might be coolio?
+  - i think like broadcast whos there, brains respond with mac addresses and maybe names?
+  - ui has like a list of available brains and maybe their available slots? 
+  - password needed?
 # HOW TO USE THE APP
 download the pre-compiled app for your platform from the [releases](https://github.com/melodycatt/h2gp/releases) (you probably just want the latest one)
 ## how to know which one to download
