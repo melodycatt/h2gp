@@ -145,21 +145,6 @@ impl eframe::App for App {
                     let dot = acc_vec.dot(FLIPPED_GRAVITY);
                     let flipped = dot / acc_mag > 0.8;
 
-                    ui.label(format!(
-                        "aa!! aaa! you are {}flipped",
-                        if flipped { "" } else { "NOT " }
-                    ));
-                    PolarGrid::default().show(
-                        ui,
-                        egui::Vec2 {
-                            x: msg.acc[0],
-                            y: msg.acc[1],
-                        },
-                        egui::Vec2 { x: 250., y: 250. },
-                        self.colors,
-                    );
-
-                    cube_widget(ui, msg.gyr, egui::vec2(250.0, 250.0), self.colors);
                     // ui.set_width(ui.min_size().x);
                     // ui.shrink_height_to_current()
                     if ui.button("reset").clicked() {
@@ -169,6 +154,8 @@ impl eframe::App for App {
                     let delta = (msg.elapsed_time - self.last_millis) as f32 / 1000.;
                     self.last_millis = msg.elapsed_time;
                     self.d += (-msg.acc[1] - 1.) * 9.8 * delta;
+
+                    ui.add(FuelGauge::new(8.3, 0., 11.5))
                 });
             });
         }
@@ -377,7 +364,9 @@ fn main() -> eframe::Result<()> {
                     fan_speed: 0,
                     restart: 0,
                     mac_no: 0,
-                    _pad: [0; 5],
+                    _pad: [0; 2],
+                    receivers: [0; 2],
+                    send_wait: 0,
                 },
                 mac_no: 1,
                 message_history: VecDeque::new(),

@@ -9,14 +9,13 @@
 #![deny(clippy::large_stack_frames)]
 #![allow(clippy::empty_loop)]
 
-// use esp_backtrace as _;
-use esp_hal::analog::adc::AdcConfig;
+use esp_backtrace as _;
+use esp_hal::delay;
 use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::i2c::master::I2c;
 use esp_hal::main;
 use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::{analog, delay};
 // use esp_println::println;
 use icm42688::Icm42688;
 use ina226::Ina226;
@@ -51,7 +50,10 @@ struct CommandPacket {
     purge_interval: u32,
     fan_speed: u8,
     restart: u8,
-    _pad: [u8; 6],
+    _mac_no: u8,
+    send_wait: u8,
+    receivers: [u8; 2],
+    _pad: [u8; 2],
 }
 
 use bytemuck::{Pod, Zeroable};
@@ -102,6 +104,8 @@ struct State {
     message: MessagePacket,
 
     start_time: Option<Instant>,
+    receivers: [u8; 2],
+    send_wait: u8,
 }
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -141,6 +145,7 @@ fn main() -> ! {
     let mut state = State {
         purge_time: 150,
         purge_interval: 20000,
+        send_wait: 1,
         ..Default::default()
     };
     let mut peripherals =
@@ -260,15 +265,16 @@ fn main() -> ! {
     valve1.set_low();
     valve2.set_low();
 
-    let mut cfg = AdcConfig::new();
-    let mut therm = cfg.enable_pin(peripherals.GPIO3, analog::adc::Attenuation::_11dB);
-    let mut adc = analog::adc::Adc::new(peripherals.ADC1, cfg);
+    // let mut cfg = AdcConfig::new();
+    // let mut therm = cfg.enable_pin(peripherals.GPIO3, analog::adc::Attenuation::_11dB);
+    // let mut adc = analog::adc::Adc::new(peripherals.ADC1, cfg);
 
     state.start_time = Some(Instant::now());
     state.last_sample_ms = state.start_time;
     state.previous_time = state.start_time;
     state.short_previous_time = state.start_time;
     ready_led.set_high();
+    let mut connected = false;
 
     loop {
         // unwrap_or_report!(imu.detect_config(), &mut esp_now, Module::Imu);
@@ -331,13 +337,13 @@ fn main() -> ! {
             valve2.set_low();
             state.purge_complete = true;
         }
-        let raw_therm = unwrap_or_report!(
-            nb::block!(adc.read_oneshot(&mut therm)),
-            &mut esp_now,
-            Module::Adc
-        );
-        let v_out = raw_therm as f32;
-        state.message.a1_voltage = v_out;
+        // let raw_therm = unwrap_or_report!(
+        //     nb::block!(adc.read_oneshot(&mut therm)),
+        //     &mut esp_now,
+        //     Module::Adc
+        // );
+        // let v_out = raw_therm as f32;
+        // state.message.a1_voltage = v_out;
 
         state.message.elapsed_time = (current_time - state.start_time.unwrap()).as_millis() as u32;
         if let Some(data) = esp_now.receive() {
@@ -348,6 +354,8 @@ fn main() -> ! {
                     esp_hal::system::software_reset()
                 }
 
+                state.send_wait = command.send_wait;
+                state.receivers = command.receivers;
                 state.fan_speed = command.fan_speed;
                 state.purge_interval = command.purge_interval;
                 state.purge_time = command.purge_time;
@@ -358,15 +366,43 @@ fn main() -> ! {
         let mut send_buf = [0u8; MSG_LEN];
         send_buf[0] = 0x00;
         send_buf[1..].copy_from_slice(bytemuck::bytes_of(&state.message));
-        // println!("sending!!!! {send_buf:?}");
-        if let Ok(waiter) = esp_now.send(&SRC_ADDR, &send_buf) {
-            ready_led.set_high();
-            let _ = waiter.wait();
-        } else {
-            ready_led.set_low();
+        if state.receivers[0] != 0 {
+            if let Ok(waiter) =
+                esp_now.send(&PEER_ADDRS[state.receivers[0] as usize - 1], &send_buf)
+            {
+                connect(&mut connected, true, &mut ready_led);
+                if state.send_wait != 0 {
+                    let _ = waiter.wait();
+                }
+            } else {
+                connect(&mut connected, false, &mut ready_led);
+            }
+        }
+        if state.receivers[1] != 0 {
+            if let Ok(waiter) =
+                esp_now.send(&PEER_ADDRS[state.receivers[1] as usize - 1], &send_buf)
+            {
+                connect(&mut connected, true, &mut ready_led);
+                if state.send_wait != 0 {
+                    let _ = waiter.wait();
+                }
+            } else {
+                connect(&mut connected, false, &mut ready_led);
+            }
         }
 
+        // println!("sending!!!! {send_buf:?}");
         delay.delay_millis(1);
+    }
+}
+
+fn connect(current: &mut bool, new: bool, ready_led: &mut Output) {
+    if *current != new {
+        *current = new;
+        ready_led.set_level(match new {
+            false => Level::Low,
+            true => Level::High,
+        });
     }
 }
 
@@ -416,7 +452,7 @@ fn send_error_msg<E: fmt::Debug>(
     let _ = esp_now.send(&SRC_ADDR, &buf[..4 + pos]);
 }
 
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    esp_hal::system::software_reset()
-}
+// #[panic_handler]
+// fn panic(_: &core::panic::PanicInfo) -> ! {
+//     esp_hal::system::software_reset()
+// }

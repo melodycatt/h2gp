@@ -1,8 +1,13 @@
 [package]
 name = "interface"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 default-run = "interface"
+
+[package.metadata.bundle.bin.interface]
+name = "H2GP"
+identifier = "com.webpaige.h2gp"
+icon = ["./icon.jpg"]
 
 [dependencies]
 anyhow = "1"
@@ -16,3 +21,6 @@ image = "0.25.10"
 crossbeam = "0.8.4"
 toml = "1.1.2"
 serde = { version = "1.0.228", features = ["serde_derive"] }
+directories = "6.0.0"
+
+

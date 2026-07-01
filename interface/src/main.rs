@@ -3,7 +3,6 @@ use std::{
     env,
     f32::consts::PI,
     io::{Read, Write},
-    path::Path,
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
@@ -11,7 +10,10 @@ use std::{
 
 use eframe::egui::{self, Stroke, Ui};
 use egui_plot::{Line, Plot, PlotPoints};
-use interface::*;
+use interface::{
+    config::{Config, save},
+    *,
+};
 
 const MESSAGE: u8 = 0x01;
 const PRINT: u8 = 0x0;
@@ -25,7 +27,9 @@ struct App {
     log_rx: crossbeam::channel::Receiver<String>,
     msg_rx: crossbeam::channel::Receiver<MessagePacket>,
     cpckt: CommandPacket,
+    receivers: [u8; 2],
     mac_no: u8,
+    send_wait: bool,
     // purge_time: u32,
     // purge_interval: u32,
     // fan_speed: u8,
@@ -53,6 +57,7 @@ struct App {
     count: usize,
     long_term: Vec<MessagePacket>,
     long_graphs: bool,
+    port_path: String,
 }
 
 impl eframe::App for App {
@@ -284,15 +289,41 @@ impl eframe::App for App {
                             ui.label("purge interval:");
                             ui.add(
                                 egui::DragValue::new(&mut self.cpckt.purge_interval)
-                                    .custom_formatter(|x, _| format!("{:05?}", x as u32)),
+                                    .custom_formatter(|x, _| format!("{:05?}", x as u32))
+                                    .speed(0.),
                             );
 
                             ui.end_row();
                             ui.label("purge time:");
                             ui.add(
                                 egui::DragValue::new(&mut self.cpckt.purge_time)
-                                    .custom_formatter(|x, _| format!("{:05?}", x as u32)),
+                                    .custom_formatter(|x, _| format!("{:05?}", x as u32))
+                                    .speed(0.),
                             );
+                            ui.end_row();
+                            ui.add_space(10.);
+
+                            ui.end_row();
+                            ui.label("receiver 1:");
+                            if ui
+                                .add(egui::DragValue::new(&mut self.receivers[0]).speed(0.))
+                                .changed()
+                            {
+                                self.cpckt.receivers[0] = self.receivers[0];
+                            };
+                            ui.end_row();
+                            ui.label("receiver 2:");
+                            if ui
+                                .add(egui::DragValue::new(&mut self.receivers[1]).speed(0.))
+                                .changed()
+                            {
+                                self.cpckt.receivers[1] = self.receivers[1];
+                            };
+                            ui.end_row();
+                            ui.label("send wait:");
+                            if ui.checkbox(&mut self.send_wait, "").changed() {
+                                self.cpckt.send_wait = self.send_wait as u8;
+                            };
                             ui.end_row();
                         });
 
@@ -304,6 +335,7 @@ impl eframe::App for App {
                             let _ = port.write_all(&[0]);
                             let _ = port.write_all(bytemuck::bytes_of(&self.cpckt));
                         }
+                        self.cpckt.mac_no = self.mac_no
                     }
                     ui.add_space(10.);
 
@@ -323,6 +355,14 @@ impl eframe::App for App {
                         thread::sleep(Duration::from_millis(100));
                         port.write_data_terminal_ready(true).unwrap();
                     }
+                    ui.add_space(15.);
+                    ui.label("brain #:");
+                    if ui
+                        .add(egui::DragValue::new(&mut self.mac_no).speed(0.))
+                        .changed()
+                    {
+                        self.cpckt.mac_no = self.mac_no;
+                    };
                     if ui.button("connect").clicked() {
                         self.cpckt.restart = 0;
                         if let Ok(mut port) = self.port.lock() {
@@ -333,21 +373,26 @@ impl eframe::App for App {
                 });
         }
 
-        ctx.request_repaint_after(Duration::from_millis(if idle { 100 } else { 1000 / 30 }));
+        ctx.request_repaint_after(Duration::from_millis(if idle { 200 } else { 1000 / 20 }));
+    }
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        save(&Config {
+            port: self.port_path.clone(),
+            default_addr: self.mac_no,
+            purge_time: self.cpckt.purge_time,
+            purge_interval: self.cpckt.purge_interval,
+            receivers: self.receivers,
+            send_wait: self.send_wait as u8,
+        })
+        .expect("PLEASE")
     }
 }
 
 // #[unsafe(no_mangle)]
 fn main() -> eframe::Result<()> {
-    let path = env::current_dir()
-        .unwrap()
-        // .parent()
-        // .unwrap()
-        .join("config.toml");
-    println!("{path:?}");
-    let conf = config::load_from(path);
+    let conf = config::load();
 
-    let mut raw_port = serialport::new(conf.port, 115_200)
+    let mut raw_port = serialport::new(conf.port.clone(), 115_200)
         .timeout(Duration::from_millis(10000))
         .open()
         .unwrap();
@@ -457,14 +502,18 @@ fn main() -> eframe::Result<()> {
                 msg_rx,
                 log_rx,
                 cpckt: CommandPacket {
-                    purge_time: 150,
-                    purge_interval: 20_000,
+                    purge_time: conf.purge_time,
+                    purge_interval: conf.purge_interval,
                     fan_speed: 0,
                     restart: 0,
                     mac_no: conf.default_addr,
-                    _pad: [0; 5],
+                    receivers: conf.receivers,
+                    send_wait: conf.send_wait,
+                    _pad: [0; 2],
                 },
                 mac_no: conf.default_addr,
+                receivers: conf.receivers,
+                send_wait: conf.send_wait != 0,
                 message_history,
                 start: Instant::now(),
                 port,
@@ -484,6 +533,7 @@ fn main() -> eframe::Result<()> {
                 long_term: Vec::new(),
                 log: Vec::new(),
                 count: 0,
+                port_path: conf.port,
             };
             Ok(Box::new(app))
         }),
@@ -570,18 +620,18 @@ fn graphs_long(app: &mut App, ui: &mut Ui) {
                 .y_axis_label("temperature")
                 .allow_axis_zoom_drag(false)
                 .show(ui, |plot_ui| {
-                    plot_ui.line(
-                        Line::new(
-                            "fuel cell",
-                            PlotPoints::from_iter(
-                                app.long_term
-                                    .iter()
-                                    .enumerate()
-                                    .map(|x| [x.0 as f64, x.1.a1_voltage as f64]),
-                            ),
-                        )
-                        .color(app.colors.accent_xl),
-                    );
+                    // plot_ui.line(
+                    //     Line::new(
+                    //         "fuel cell",
+                    //         PlotPoints::from_iter(
+                    //             app.long_term
+                    //                 .iter()
+                    //                 .enumerate()
+                    //                 .map(|x| [x.0 as f64, x.1.a1_voltage as f64]),
+                    //         ),
+                    //     )
+                    //     .color(app.colors.accent_xl),
+                    // );
                     plot_ui.line(
                         Line::new(
                             "imu",
@@ -679,18 +729,18 @@ fn graphs(app: &mut App, ui: &mut Ui) {
                 .y_axis_label("temperature")
                 .allow_axis_zoom_drag(false)
                 .show(ui, |plot_ui| {
-                    plot_ui.line(
-                        Line::new(
-                            "fuel cell",
-                            PlotPoints::from_iter(
-                                app.message_history
-                                    .iter()
-                                    .enumerate()
-                                    .map(|x| [x.0 as f64, x.1.a1_voltage as f64]),
-                            ),
-                        )
-                        .color(app.colors.accent_xl),
-                    );
+                    // plot_ui.line(
+                    //     Line::new(
+                    //         "fuel cell",
+                    //         PlotPoints::from_iter(
+                    //             app.message_history
+                    //                 .iter()
+                    //                 .enumerate()
+                    //                 .map(|x| [x.0 as f64, x.1.a1_voltage as f64]),
+                    //         ),
+                    //     )
+                    //     .color(app.colors.accent_xl),
+                    // );
                     plot_ui.line(
                         Line::new(
                             "imu",

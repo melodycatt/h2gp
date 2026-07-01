@@ -44,7 +44,9 @@ struct CommandPacket {
     fan_speed: u8,
     restart: u8,
     mac_no: u8,
-    _pad: [u8; 5],
+    send_wait: u8,
+    receivers: [u8; 2],
+    _pad: [u8; 2],
 }
 #[derive(Default, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
@@ -142,7 +144,7 @@ fn on_receive() {
                     let _ = writeln!(writer, "everythings happy :) got cmd");
                     let len = writer.pos;
 
-                    usb.write(&[PRINT]).ok();
+                    usb.write(&[PRINT, PRINT]).ok();
                     usb.write(&(len as u16).to_be_bytes()).ok();
                     usb.write(&buf[..len]).ok();
                     usb.flush().ok();
@@ -163,7 +165,7 @@ fn on_receive() {
                     let _ = writeln!(writer, "everythings happy :) got ctrl");
                     let len = writer.pos;
 
-                    usb.write(&[PRINT]).ok();
+                    usb.write(&[PRINT, PRINT]).ok();
                     usb.write(&(len as u16).to_be_bytes()).ok();
                     usb.write(&buf[..len]).ok();
                     usb.flush().ok();
@@ -183,7 +185,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 )]
 #[main]
 fn main() -> ! {
-    esp_println::logger::init_logger_from_env();
+    // esp_println::logger::init_logger_from_env();
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let peripherals = esp_hal::init(config);
 
@@ -224,10 +226,10 @@ fn main() -> ! {
     controller.start().unwrap();
 
     let mut esp_now = interfaces.esp_now;
-    for i in 0..3 {
+    for i in PEER_ADDRS.iter() {
         let peer_info = PeerInfo {
             interface: esp_now::EspNowWifiInterface::Sta,
-            peer_address: PEER_ADDRS[i],
+            peer_address: *i,
             lmk: None,
             channel: Some(0),
             encrypt: false,

@@ -1,5 +1,7 @@
 use bytemuck::{Pod, Zeroable};
-use eframe::egui::{self, Color32, Context, Pos2, Response, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{
+    self, Color32, Context, Pos2, Response, Sense, Shape, Stroke, Ui, Vec2, Widget,
+};
 mod fonts;
 pub use fonts::*;
 pub mod config;
@@ -32,7 +34,9 @@ pub struct CommandPacket {
     pub fan_speed: u8,
     pub restart: u8,
     pub mac_no: u8,
-    pub _pad: [u8; 5],
+    pub send_wait: u8,
+    pub receivers: [u8; 2],
+    pub _pad: [u8; 2],
 }
 pub struct PolarGrid {
     pub radius_steps: usize,
@@ -403,4 +407,208 @@ pub fn apply_theme(ctx: &egui::Context, colors: Colors) {
 pub struct ControlPacket {
     pub forward: f32,
     pub steer: f32,
+}
+
+pub struct FuelGauge {
+    value: f32,
+    min: f32,
+    max: f32,
+    extra_max: f32,
+    reserve_fraction: f32,
+    size: f32,
+}
+
+impl FuelGauge {
+    pub fn new(value: f32, min: f32, max: f32) -> Self {
+        Self {
+            value,
+            min,
+            max,
+            extra_max: (max - min) * 0.1,
+            reserve_fraction: 0.15,
+            size: 150.0,
+        }
+    }
+
+    pub fn extra_max(mut self, extra: f32) -> Self {
+        self.extra_max = extra.max(0.0);
+        self
+    }
+
+    pub fn reserve_fraction(mut self, f: f32) -> Self {
+        self.reserve_fraction = f.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn size(mut self, size: f32) -> Self {
+        self.size = size.max(20.0);
+        self
+    }
+}
+
+impl Widget for FuelGauge {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let desired = Vec2::splat(self.size);
+        let (rect, response) = ui.allocate_exact_size(desired, Sense::hover());
+
+        let painter = ui.painter_at(rect);
+        let visuals = ui.visuals();
+
+        let center = Pos2::new(rect.center().x, rect.bottom() - rect.height() * 0.05);
+        let radius = rect.width().min(rect.height()) * 0.42;
+
+        // 240° sweep (more "instrument-like")
+        let start_angle = std::f32::consts::PI * 5.0 / 6.0; // 150°
+        let end_angle = std::f32::consts::PI * 1.0 / 6.0; // 30°
+        let sweep = start_angle - end_angle;
+
+        let drawable_max = self.max + self.extra_max;
+        let min = self.min;
+
+        let range = (drawable_max - min).max(f32::EPSILON);
+
+        let value = self.value.clamp(min, drawable_max);
+        let t = ((value - min) / range).clamp(0.0, 1.0);
+
+        let angle_at = |t: f32| start_angle - sweep * t;
+
+        let needle_angle = angle_at(t);
+
+        let reserve_t = self.reserve_fraction.clamp(0.0, 1.0);
+
+        let arc_points = |a0: f32, a1: f32, r: f32| {
+            let segments = 64;
+            (0..=segments)
+                .map(|i| {
+                    let t = i as f32 / segments as f32;
+                    let a = a0 + (a1 - a0) * t;
+                    Pos2::new(center.x + a.cos() * r, center.y - a.sin() * r)
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let normal_color = visuals.widgets.inactive.fg_stroke.color;
+        let text_color = visuals.text_color();
+        let bg_color = visuals.widgets.noninteractive.bg_fill;
+
+        let reserve_color = Color32::RED;
+        let overrange_color = Color32::from_rgb(255, 140, 0);
+
+        // ---- Background arc ----
+        painter.add(Shape::line(
+            arc_points(start_angle, end_angle, radius),
+            Stroke::new(radius * 0.06, bg_color),
+        ));
+
+        // ---- Normal arc (filled up to max) ----
+        let normal_t = ((self.max - min) / range).clamp(0.0, 1.0);
+
+        painter.add(Shape::line(
+            arc_points(start_angle, angle_at(normal_t), radius),
+            Stroke::new(radius * 0.06, normal_color),
+        ));
+
+        // ---- Reserve zone ----
+        let reserve_end = (self.max - min) / range * reserve_t;
+        painter.add(Shape::line(
+            arc_points(angle_at(normal_t), angle_at(reserve_end), radius),
+            Stroke::new(radius * 0.08, reserve_color),
+        ));
+
+        // ---- Overrange ----
+        if self.extra_max > 0.0 {
+            painter.add(Shape::line(
+                arc_points(angle_at(normal_t), end_angle, radius),
+                Stroke::new(radius * 0.06, overrange_color),
+            ));
+        }
+
+        // ---- Ticks ----
+        for i in 0..=20 {
+            let t = i as f32 / 20.0;
+            let a = angle_at(t);
+
+            let is_major = i % 4 == 0;
+
+            let inner_r = if is_major {
+                radius * 0.78
+            } else {
+                radius * 0.86
+            };
+
+            let outer_r = radius * 0.95;
+
+            let inner = Pos2::new(center.x + a.cos() * inner_r, center.y - a.sin() * inner_r);
+
+            let outer = Pos2::new(center.x + a.cos() * outer_r, center.y - a.sin() * outer_r);
+
+            painter.line_segment(
+                [inner, outer],
+                Stroke::new(if is_major { 2.0 } else { 1.0 }, text_color),
+            );
+        }
+
+        // ---- Needle (triangular) ----
+        let needle_len = radius * 0.82;
+        let needle_width = radius * 0.06;
+
+        let dir = Vec2::new(needle_angle.cos(), -needle_angle.sin());
+        let perp = Vec2::new(-dir.y, dir.x);
+
+        let tip = center + dir * needle_len;
+        let left = center + perp * needle_width;
+        let right = center - perp * needle_width;
+
+        painter.add(Shape::convex_polygon(
+            vec![tip, left, right],
+            Color32::from_gray(220),
+            Stroke::new(1.0, Color32::BLACK),
+        ));
+
+        // ---- Hub ----
+        painter.circle_filled(center, radius * 0.08, text_color);
+        painter.circle_filled(center, radius * 0.05, bg_color);
+
+        // ---- Center value text ----
+        let percent = ((value - min) / (self.max - min).max(f32::EPSILON)) * 100.0;
+
+        painter.text(
+            center - Vec2::new(0.0, 10.0),
+            egui::Align2::CENTER_CENTER,
+            format!("{:.0}%", percent.clamp(0.0, 999.0)),
+            egui::FontId::proportional(radius * 0.18),
+            text_color,
+        );
+
+        // ---- Labels ----
+        let label_r = radius * 1.08;
+
+        let empty_pos = Pos2::new(
+            center.x + start_angle.cos() * label_r,
+            center.y - start_angle.sin() * label_r,
+        );
+
+        let full_pos = Pos2::new(
+            center.x + end_angle.cos() * label_r,
+            center.y - end_angle.sin() * label_r,
+        );
+
+        painter.text(
+            empty_pos,
+            egui::Align2::CENTER_CENTER,
+            "E",
+            egui::FontId::proportional(radius * 0.14),
+            text_color,
+        );
+
+        painter.text(
+            full_pos,
+            egui::Align2::CENTER_CENTER,
+            "F",
+            egui::FontId::proportional(radius * 0.14),
+            text_color,
+        );
+
+        response
+    }
 }

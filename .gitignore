@@ -2,6 +2,9 @@
 target/
 build/
 
+**/*.dmg
+**/*.app
+interface/interface_mac
 
 **/.DS_Store
 

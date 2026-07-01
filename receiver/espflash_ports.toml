@@ -1,2 +1,2 @@
 [connection]
-serial = "/dev/tty.usbmodem1101"
+serial = "/dev/tty.usbmodem101"
