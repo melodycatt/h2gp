@@ -1,3 +1,13 @@
+### to do
+- customizable color
+- open without receiver
+- changable port
+- macos install script
+- connect to multiple brains, add identity to packets
+- status on multiple brains
+- improve ui, learn from the dutch
+- battey indicator
+
 # HOW TO USE THE APP
 download the pre-compiled app for your platform from the [releases](https://github.com/melodycatt/h2gp/releases) (you probably just want the latest one)
 ## how to know which one to download
