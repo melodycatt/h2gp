@@ -8,6 +8,7 @@
 - improve ui, learn from the dutch
 - battey indicator
 - auto connect/handshake packet :p
+- broadcast scanny thing? might be coolio?
 # HOW TO USE THE APP
 download the pre-compiled app for your platform from the [releases](https://github.com/melodycatt/h2gp/releases) (you probably just want the latest one)
 ## how to know which one to download
