@@ -126,26 +126,18 @@ fn main() -> ! {
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
+    let wifi = peripherals.WIFI;
+    let station_config =
+        esp_radio::wifi::Config::Station(esp_radio::wifi::sta::StationConfig::default());
     let (mut controller, interfaces) =
         esp_radio::wifi::new(peripherals.WIFI, Default::default()).unwrap();
-    controller.set_config(&esp_radio::wifi::Config::Station(StationConfig::default()));
-    // controller.(wifi::WifiMode::Sta).unwrap();
-    // controller.start().unwrap();
+    controller.set_config(&station_config);
 
     let mut esp_now = interfaces.esp_now;
 
-    // let peer_info = PeerInfo {
-    //     interface: esp_now::EspNowWifiInterface::Sta,
-    //     peer_address: SRC_ADDR,
-    //     lmk: None,
-    //     channel: Some(0),
-    //     encrypt: false,
-    // };
-    // esp_now.add_peer(peer_info).unwrap();
-
     for i in &PEER_ADDRS {
         let peer_info = PeerInfo {
-            interface: esp_now::EspNowWifiInterface::Sta,
+            interface: esp_now::EspNowWifiInterface::Station,
             peer_address: *i,
             lmk: None,
             channel: Some(0),
@@ -325,7 +317,7 @@ fn main() -> ! {
             if data[1] == 1 {
                 let scan = bytemuck::pod_read_unaligned::<ScanPacket>(&data[1..]);
 
-                nvs.set("my_key", &your_32_bytes)?;
+                nvs.set("my_key", &b"meow")?;
                 let data: [u8; 32] = nvs.get("my_key")?;
                 let shake = HandshakeInit {
                     name: todo!(),

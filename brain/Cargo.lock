@@ -607,7 +607,7 @@ checksum = "e7127e29e84de4171b37d41f577b9dad0b105dc8abe64c611978f2cbf6da1357"
 dependencies = [
  "embedded-storage",
  "esp-hal",
- "esp-storage 0.8.1",
+ "esp-storage",
  "strum",
  "thiserror",
 ]
@@ -756,21 +756,6 @@ dependencies = [
  "esp-metadata-generated 0.3.0",
  "esp-rom-sys",
  "esp-sync 0.1.1",
-]
-
-[[package]]
-name = "esp-storage"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cf2b3f00c9f94b27c62a4f5296b19470c3a083c687c8146e554a459f9bee596"
-dependencies = [
- "document-features",
- "embedded-storage",
- "esp-hal",
- "esp-hal-procmacros 0.22.0",
- "esp-metadata-generated 0.4.0",
- "esp-rom-sys",
- "esp-sync 0.2.1",
 ]
 
 [[package]]
@@ -1047,7 +1032,7 @@ dependencies = [
  "esp-println",
  "esp-radio",
  "esp-rtos",
- "esp-storage 0.9.0",
+ "esp-storage",
  "icm42688",
  "ina226",
  "libm",
