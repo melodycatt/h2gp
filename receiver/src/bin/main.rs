@@ -1,12 +1,9 @@
 #![no_std]
 #![no_main]
 #![deny(clippy::large_stack_frames)]
-// #![deny(clippy::mem_forget)]
 
 use core::cell::RefCell;
-use core::fmt::{self, Write};
-
-use bytemuck::{Pod, Zeroable};
+use core::fmt::Write;
 use critical_section::Mutex;
 use embedded_io::{Read, Write as IoWrite};
 use esp_hal::clock::CpuClock;
@@ -18,88 +15,13 @@ use esp_hal::{Blocking, handler, main};
 use esp_radio::esp_now::{self, PeerInfo};
 use esp_radio::{Controller, wifi};
 use static_cell::StaticCell;
+use util_types::*;
 
-const MESSAGE: u8 = 0x01;
-const PRINT: u8 = 0x00;
-
-// test
-// const PEER_ADDRS[mac_no]: [u8; 6] = [148, 169, 144, 109, 231, 180];
-// real test old
 include!(concat!(env!("OUT_DIR"), "/known_macs.rs"));
-
-// KNOWN_MACS is now available as [[u8; 6]; N] with the exact count baked in
-// const PEER_ADDRS: [[u8; 6]; 3] = [
-//     [148, 169, 144, 122, 44, 104],
-//     [148, 169, 144, 109, 231, 180],
-//     [148, 169, 144, 106, 157, 104],
-// ];
-// old
-// const PEER_ADDRS[mac_no]: [u8; 6] = [176, 129, 132, 5, 216, 100];
-
-#[derive(Default, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct CommandPacket {
-    purge_time: u32,
-    purge_interval: u32,
-    fan_speed: u8,
-    restart: u8,
-    mac_no: u8,
-    send_wait: u8,
-    receivers: [u8; 2],
-    _pad: [u8; 2],
-}
-#[derive(Default, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct ControlPacket {
-    forward: f32,
-    steer: f32,
-}
-// union Packet {
-//     controls: ControlPacket,
-//     command: CommandPacket,
-// }
-
-#[derive(Default, Clone, Copy, Pod, Zeroable, Debug)]
-#[repr(C)]
-struct MessagePacket {
-    acc: [f32; 3],
-    gyr: [f32; 3],
-    temp: f32,
-    time_since_purge: u32,
-    elapsed_time: u32,
-    voltage: f32,
-    current: f32,
-    power: f32,
-    fc_voltage: f32,
-    fc_current: f32,
-    batt_flags: u16,
-    fc_flags: u16,
-    energy_wh: f32,
-    hydro_wh: f32,
-    a1_voltage: f32,
-    free_heap: u32,
-    test_data: u32,
-}
-
 static USB_SERIAL: Mutex<RefCell<Option<UsbSerialJtag<'static, Blocking>>>> =
     Mutex::new(RefCell::new(None));
 static RADIO: StaticCell<Controller> = StaticCell::new();
-
-struct BufWriter<'a> {
-    buf: &'a mut [u8],
-    pos: usize,
-}
-
-impl<'a> Write for BufWriter<'a> {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        let bytes = s.as_bytes();
-        let remaining = self.buf.len().saturating_sub(self.pos);
-        let n = remaining.min(bytes.len());
-        self.buf[self.pos..self.pos + n].copy_from_slice(&bytes[..n]);
-        self.pos += n;
-        Ok(())
-    }
-}
+static PENDING_CMD: Mutex<RefCell<Option<CommandPacket>>> = Mutex::new(RefCell::new(None));
 
 macro_rules! usb_println {
     ($($arg:tt)*) => {{
@@ -120,64 +42,6 @@ macro_rules! usb_println {
     }};
 }
 
-#[handler]
-fn on_receive() {
-    usb_println!("hearing ya loud and clear cap'n!");
-    critical_section::with(|cs| {
-        usb_println!("startin the engines");
-        if let Some(usb) = USB_SERIAL.borrow_ref_mut(cs).as_mut() {
-            let mut header = [0; 1];
-            usb.read_exact(&mut header).ok();
-            if header[0] == 0 {
-                let mut buf = [0u8; core::mem::size_of::<CommandPacket>()];
-                usb.read_exact(&mut buf).ok();
-                let packet: &CommandPacket = bytemuck::from_bytes(&buf);
-
-                *PENDING_CMD.borrow_ref_mut(cs) = Some(*packet);
-
-                {
-                    let mut buf = [0u8; 50];
-                    let mut writer = BufWriter {
-                        buf: &mut buf,
-                        pos: 0,
-                    };
-                    let _ = writeln!(writer, "everythings happy :) got cmd");
-                    let len = writer.pos;
-
-                    usb.write(&[PRINT, PRINT]).ok();
-                    usb.write(&(len as u16).to_be_bytes()).ok();
-                    usb.write(&buf[..len]).ok();
-                    usb.flush().ok();
-                }
-            } else if header[0] == 1 {
-                let mut buf = [0u8; core::mem::size_of::<ControlPacket>()];
-                usb.read_exact(&mut buf).ok();
-                let packet: &ControlPacket = bytemuck::from_bytes(&buf);
-
-                *PENDING_CTRL.borrow_ref_mut(cs) = Some(*packet);
-
-                {
-                    let mut buf = [0u8; 50];
-                    let mut writer = BufWriter {
-                        buf: &mut buf,
-                        pos: 0,
-                    };
-                    let _ = writeln!(writer, "everythings happy :) got ctrl");
-                    let len = writer.pos;
-
-                    usb.write(&[PRINT, PRINT]).ok();
-                    usb.write(&(len as u16).to_be_bytes()).ok();
-                    usb.write(&buf[..len]).ok();
-                    usb.flush().ok();
-                }
-            }
-            usb.reset_rx_packet_recv_interrupt();
-        }
-    });
-}
-static PENDING_CMD: Mutex<RefCell<Option<CommandPacket>>> = Mutex::new(RefCell::new(None));
-static PENDING_CTRL: Mutex<RefCell<Option<ControlPacket>>> = Mutex::new(RefCell::new(None));
-
 esp_bootloader_esp_idf::esp_app_desc!();
 #[allow(
     clippy::large_stack_frames,
@@ -185,7 +49,6 @@ esp_bootloader_esp_idf::esp_app_desc!();
 )]
 #[main]
 fn main() -> ! {
-    // esp_println::logger::init_logger_from_env();
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let peripherals = esp_hal::init(config);
 
@@ -288,7 +151,8 @@ fn main() -> ! {
                 } else {
                     None
                 }
-            } else if let Some(ctrl) = PENDING_CTRL.borrow_ref_mut(cs).take() {
+            }
+            /*else if let Some(ctrl) = PENDING_CTRL.borrow_ref_mut(cs).take() {
                 usb_println!("{:?}", &[&[1], bytemuck::bytes_of(&ctrl)].concat());
                 if let Ok(waiter) = esp_now.send(
                     &PEER_ADDRS[mac_no],
@@ -299,7 +163,8 @@ fn main() -> ! {
                 } else {
                     None
                 }
-            } else {
+            }*/
+            else {
                 None
             }
         }) {
@@ -316,47 +181,65 @@ fn main() -> ! {
     }
 }
 
-use core::panic::PanicInfo;
-
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
     usb_println!("PANIC: {}", info);
 
     loop {}
 }
-#[repr(u8)]
-#[derive(Clone, Copy, Debug)]
-enum Module {
-    FcVcInit = 0x00,
-    BatVcInit = 0x01,
-    ImuInit = 0x02,
-    I2CInit = 0x03,
-    FcVc = 0x04,
-    BatVc = 0x05,
-    Imu = 0x06,
-    Adc = 0x08,
-    Ledc = 0x09,
-}
-impl core::fmt::Display for Module {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-impl TryFrom<u8> for Module {
-    type Error = ();
 
-    fn try_from(v: u8) -> Result<Self, Self::Error> {
-        match v {
-            0x00 => Ok(Self::FcVcInit),
-            0x01 => Ok(Self::BatVcInit),
-            0x02 => Ok(Self::ImuInit),
-            0x03 => Ok(Self::I2CInit),
-            0x04 => Ok(Self::FcVc),
-            0x05 => Ok(Self::BatVc),
-            0x06 => Ok(Self::Imu),
-            0x08 => Ok(Self::Adc),
-            0x09 => Ok(Self::Ledc),
-            _ => Err(()),
+#[handler]
+fn on_receive() {
+    usb_println!("hearing ya loud and clear cap'n!");
+    critical_section::with(|cs| {
+        usb_println!("startin the engines");
+        if let Some(usb) = USB_SERIAL.borrow_ref_mut(cs).as_mut() {
+            let mut header = [0; 1];
+            usb.read_exact(&mut header).ok();
+            if header[0] == 0 {
+                let mut buf = [0u8; core::mem::size_of::<CommandPacket>()];
+                usb.read_exact(&mut buf).ok();
+                let packet: &CommandPacket = bytemuck::from_bytes(&buf);
+
+                *PENDING_CMD.borrow_ref_mut(cs) = Some(*packet);
+
+                {
+                    let mut buf = [0u8; 50];
+                    let mut writer = BufWriter {
+                        buf: &mut buf,
+                        pos: 0,
+                    };
+                    let _ = writeln!(writer, "everythings happy :) got cmd");
+                    let len = writer.pos;
+
+                    usb.write(&[PRINT, PRINT]).ok();
+                    usb.write(&(len as u16).to_be_bytes()).ok();
+                    usb.write(&buf[..len]).ok();
+                    usb.flush().ok();
+                }
+            } else if header[0] == 1 {
+                // let mut buf = [0u8; core::mem::size_of::<ControlPacket>()];
+                // usb.read_exact(&mut buf).ok();
+                // let packet: &ControlPacket = bytemuck::from_bytes(&buf);
+                //
+                // *PENDING_CTRL.borrow_ref_mut(cs) = Some(*packet);
+                //
+                // {
+                //     let mut buf = [0u8; 50];
+                //     let mut writer = BufWriter {
+                //         buf: &mut buf,
+                //         pos: 0,
+                //     };
+                //     let _ = writeln!(writer, "everythings happy :) got ctrl");
+                //     let len = writer.pos;
+                //
+                //     usb.write(&[PRINT, PRINT]).ok();
+                //     usb.write(&(len as u16).to_be_bytes()).ok();
+                //     usb.write(&buf[..len]).ok();
+                //     usb.flush().ok();
+                // }
+            }
+            usb.reset_rx_packet_recv_interrupt();
         }
-    }
+    });
 }

@@ -6,8 +6,18 @@ use std::{
     time::{Duration, Instant},
 };
 
+<<<<<<< HEAD
 use eframe::egui::{self, IconData};
 use interface::*;
+=======
+use eframe::egui::{self, Stroke, Ui};
+use egui_plot::{Line, Plot, PlotPoints};
+use interface::{
+    config::{Config, save},
+    *,
+};
+use util_types::*;
+>>>>>>> 738a6ad (fuck dude please)
 
 const MESSAGE: u8 = 0x01;
 const PRINT: u8 = 0x0;

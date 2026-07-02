@@ -8,7 +8,11 @@
 )]
 #![deny(clippy::large_stack_frames)]
 #![allow(clippy::empty_loop)]
+// Offsets from your partition table's "nvs" partition
+const NAME_PART_OFF: usize = 0x9000;
+const NAME_PART_SIZE: usize = 0x6000;
 
+extern crate alloc;
 use esp_backtrace as _;
 use esp_hal::delay;
 use esp_hal::gpio::{Level, Output, OutputConfig};
@@ -16,15 +20,23 @@ use esp_hal::i2c::master::I2c;
 use esp_hal::main;
 use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
+<<<<<<< HEAD
 use esp_println::println;
 use icm42688::Icm42688;
 use ina226::Ina226;
 
 extern crate alloc;
 
+=======
+// use esp_println::println;
+>>>>>>> 738a6ad (fuck dude please)
 use esp_hal::i2c;
 use esp_radio::esp_now::{self, PeerInfo};
 use esp_radio::wifi;
+use esp_radio::wifi::sta::StationConfig;
+use icm42688::Icm42688;
+use ina226::Ina226;
+use util_types::*;
 
 // todo me ina226 and icm42688 libraries
 // VC = voltage and current monitor
@@ -36,49 +48,6 @@ const FC_I2C_ADDR: u8 = 0x41;
 include!(concat!(env!("OUT_DIR"), "/known_macs.rs"));
 const SRC_ADDR: [u8; 6] = PEER_ADDRS[0];
 // const SRC_ADDR: [u8; 6] = [88, 140, 129, 158, 39, 188];
-
-#[derive(Default, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct ControlPacket {
-    forward: f32,
-    steer: f32,
-}
-#[derive(Default, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct CommandPacket {
-    purge_time: u32,
-    purge_interval: u32,
-    fan_speed: u8,
-    restart: u8,
-    _mac_no: u8,
-    send_wait: u8,
-    receivers: [u8; 2],
-    _pad: [u8; 2],
-}
-
-use bytemuck::{Pod, Zeroable};
-
-#[derive(Default, Clone, Copy, Pod, Zeroable, Debug)]
-#[repr(C)]
-struct MessagePacket {
-    acc: [f32; 3],
-    gyr: [f32; 3],
-    temp: f32,
-    time_since_purge: u32,
-    elapsed_time: u32,
-    voltage: f32,
-    current: f32,
-    power: f32,
-    fc_voltage: f32,
-    fc_current: f32,
-    batt_flags: u16,
-    fc_flags: u16,
-    energy_wh: f32,
-    hydro_wh: f32,
-    a1_voltage: f32,
-    free_heap: u32,
-    test_data: u32,
-}
 
 // maybe static here?
 
@@ -104,7 +73,8 @@ struct State {
     message: MessagePacket,
 
     start_time: Option<Instant>,
-    receivers: [u8; 2],
+    receivers: [[u8; 6]; 4],
+    free_slots: u8,
     send_wait: u8,
 }
 
@@ -123,19 +93,6 @@ macro_rules! unwrap_or_report {
     };
 }
 
-#[derive(Clone, Copy, Debug)]
-enum Module {
-    FcVcInit = 0x00,
-    BatVcInit = 0x01,
-    ImuInit = 0x02,
-    I2CInit = 0x03,
-    FcVc = 0x04,
-    BatVc = 0x05,
-    Imu = 0x06,
-    Adc = 0x08,
-    // Ledc = 0x09,
-}
-
 #[allow(
     clippy::large_stack_frames,
     reason = "it's not unusual to allocate larger buffers etc. in main"
@@ -146,6 +103,7 @@ fn main() -> ! {
         purge_time: 150,
         purge_interval: 20000,
         send_wait: 1,
+        free_slots: 4,
         ..Default::default()
     };
     let mut peripherals =
@@ -168,12 +126,11 @@ fn main() -> ! {
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
-    let esp_radio_ctrl = esp_radio::init().unwrap();
-    let wifi = peripherals.WIFI;
     let (mut controller, interfaces) =
-        esp_radio::wifi::new(&esp_radio_ctrl, wifi, Default::default()).unwrap();
-    controller.set_mode(wifi::WifiMode::Sta).unwrap();
-    controller.start().unwrap();
+        esp_radio::wifi::new(peripherals.WIFI, Default::default()).unwrap();
+    controller.set_config(&esp_radio::wifi::Config::Station(StationConfig::default()));
+    // controller.(wifi::WifiMode::Sta).unwrap();
+    // controller.start().unwrap();
 
     let mut esp_now = interfaces.esp_now;
 
@@ -274,6 +231,10 @@ fn main() -> ! {
     state.previous_time = state.start_time;
     println!("{PEER_ADDRS:?}");
     state.short_previous_time = state.start_time;
+    let storage = esp_storage::FlashStorage::new(peripherals.FLASH);
+    let mut nvs =
+        esp_nvs::Nvs::new(NAME_PART_OFF, NAME_PART_SIZE, storage).expect("failed to create nvs");
+
     ready_led.set_high();
     let mut connected = false;
 
@@ -356,10 +317,21 @@ fn main() -> ! {
                 }
 
                 state.send_wait = command.send_wait;
-                state.receivers = command.receivers;
+                // state.receivers = command.receivers;
                 state.fan_speed = command.fan_speed;
                 state.purge_interval = command.purge_interval;
                 state.purge_time = command.purge_time;
+            }
+            if data[1] == 1 {
+                let scan = bytemuck::pod_read_unaligned::<ScanPacket>(&data[1..]);
+
+                nvs.set("my_key", &your_32_bytes)?;
+                let data: [u8; 32] = nvs.get("my_key")?;
+                let shake = HandshakeInit {
+                    name: todo!(),
+                    available_slots: todo!(),
+                };
+                // esp_now.send(dst_addr, data);
             }
         }
         state.message.free_heap = esp_alloc::HEAP.free() as u32;
@@ -368,8 +340,8 @@ fn main() -> ! {
         send_buf[0] = 0x00;
         send_buf[1..].copy_from_slice(bytemuck::bytes_of(&state.message));
         if state.receivers[0] != 0 {
-            if let Ok(waiter) =
-                esp_now.send(&PEER_ADDRS[state.receivers[0] as usize - 1], &send_buf)
+            if let Ok(waiter) = esp_now.send(&PEER_ADDRS[0], &send_buf)
+            // esp_now.send(&PEER_ADDRS[state.receivers[0] as usize - 1], &send_buf)
             {
                 connect(&mut connected, true, &mut ready_led);
                 if state.send_wait != 0 {
@@ -380,8 +352,8 @@ fn main() -> ! {
             }
         }
         if state.receivers[1] != 0 {
-            if let Ok(waiter) =
-                esp_now.send(&PEER_ADDRS[state.receivers[1] as usize - 1], &send_buf)
+            if let Ok(waiter) = esp_now.send(&PEER_ADDRS[0], &send_buf)
+            // esp_now.send(&PEER_ADDRS[state.receivers[1] as usize - 1], &send_buf)
             {
                 connect(&mut connected, true, &mut ready_led);
                 if state.send_wait != 0 {
@@ -407,32 +379,14 @@ fn connect(current: &mut bool, new: bool, ready_led: &mut Output) {
     }
 }
 
-use core::fmt::{self, Write};
-
-/// Small stack-only writer for no_std
-struct BufWriter<'a> {
-    buf: &'a mut [u8],
-    pos: usize,
-}
-
-impl<'a> Write for BufWriter<'a> {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        let bytes = s.as_bytes();
-        let remaining = self.buf.len().saturating_sub(self.pos);
-        let n = remaining.min(bytes.len());
-        self.buf[self.pos..self.pos + n].copy_from_slice(&bytes[..n]);
-        self.pos += n;
-        Ok(())
-    }
-}
-
 /// Send a formatted error message over ESP-NOW
-fn send_error_msg<E: fmt::Debug>(
+fn send_error_msg<E: core::fmt::Debug>(
     esp_now: &mut esp_radio::esp_now::EspNow<'_>,
     module: Module,
     err: &E,
     line: u32,
 ) {
+    use core::fmt::Write;
     // println!("{:?} {:?} {:?}", module, line, err);
     // [ module | line_lo | line_hi | len | utf8 bytes... ]
     let mut buf = [0u8; 221];

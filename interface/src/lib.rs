@@ -1,4 +1,3 @@
-use bytemuck::{Pod, Zeroable};
 use eframe::egui::{
     self, Color32, Context, Pos2, Response, Sense, Shape, Stroke, Ui, Vec2, Widget,
 };
@@ -17,39 +16,7 @@ use crate::config::{Config, save};
 use egui_plot::{Line, Plot, PlotPoints};
 
 pub mod config;
-#[derive(Default, Clone, Copy, Pod, Zeroable, Debug)]
-#[repr(C)]
-pub struct MessagePacket {
-    pub acc: [f32; 3],
-    pub gyr: [f32; 3],
-    pub temp: f32,
-    pub time_since_purge: u32,
-    pub elapsed_time: u32,
-    pub voltage: f32,
-    pub current: f32,
-    pub power: f32,
-    pub fc_voltage: f32,
-    pub fc_current: f32,
-    pub batt_flags: u16,
-    pub fc_flags: u16,
-    pub energy_wh: f32,
-    pub hydro_wh: f32,
-    pub a1_voltage: f32,
-    pub free_heap: u32,
-    pub test_data: u32,
-}
-#[derive(Default, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-pub struct CommandPacket {
-    pub purge_time: u32,
-    pub purge_interval: u32,
-    pub fan_speed: u8,
-    pub restart: u8,
-    pub mac_no: u8,
-    pub send_wait: u8,
-    pub receivers: [u8; 2],
-    pub _pad: [u8; 2],
-}
+use util_types::*;
 pub struct PolarGrid {
     pub radius_steps: usize,
     pub angle_steps: usize,
@@ -488,13 +455,6 @@ pub fn apply_theme(ctx: &egui::Context, colors: Colors) {
     visuals.window_corner_radius = 0.0.into();
     setup_custom_fonts(ctx);
     ctx.set_visuals(visuals);
-}
-// TODO: swappable mac addr
-#[derive(Default, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-pub struct ControlPacket {
-    pub forward: f32,
-    pub steer: f32,
 }
 
 pub struct FuelGauge {

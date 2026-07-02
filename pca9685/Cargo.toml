@@ -6,5 +6,5 @@ edition = "2024"
 test = false
 bench = false
 [dependencies]
-esp-hal = { version = "~1.0", features = ["esp32c3", "log-04", "unstable"] }
+esp-hal = { version = "^1", features = ["esp32c3", "log-04", "unstable"] }
 heapless = "0.9.3"
