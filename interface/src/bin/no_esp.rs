@@ -62,7 +62,7 @@ impl eframe::App for App {
 
         ctx.set_pixels_per_point(2.5);
         if self.log_visible {
-            show_log(ctx, &mut self.cpckt, &mut self.mac_no, &mut msg, log)
+            show_log(ctx, self)
         }
         // const BASE_SIZE: egui::Vec2 = egui::vec2(164.8, 114.5);
 

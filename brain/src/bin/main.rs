@@ -16,7 +16,7 @@ use esp_hal::i2c::master::I2c;
 use esp_hal::main;
 use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
-// use esp_println::println;
+use esp_println::println;
 use icm42688::Icm42688;
 use ina226::Ina226;
 
@@ -272,6 +272,7 @@ fn main() -> ! {
     state.start_time = Some(Instant::now());
     state.last_sample_ms = state.start_time;
     state.previous_time = state.start_time;
+    println!("{PEER_ADDRS:?}");
     state.short_previous_time = state.start_time;
     ready_led.set_high();
     let mut connected = false;
