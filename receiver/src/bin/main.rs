@@ -4,6 +4,7 @@
 
 use core::cell::RefCell;
 use core::fmt::Write;
+use core::sync::atomic::{AtomicBool, Ordering};
 use critical_section::Mutex;
 use embedded_io::{Read, Write as IoWrite};
 use esp_hal::clock::CpuClock;
@@ -22,7 +23,7 @@ static USB_SERIAL: Mutex<RefCell<Option<UsbSerialJtag<'static, Blocking>>>> =
     Mutex::new(RefCell::new(None));
 static RADIO: StaticCell<Controller> = StaticCell::new();
 static PENDING_CMD: Mutex<RefCell<Option<CommandPacket>>> = Mutex::new(RefCell::new(None));
-
+static DO_SCAN: AtomicBool = AtomicBool::new(false);
 macro_rules! usb_println {
     ($($arg:tt)*) => {{
         critical_section::with(|cs| {
@@ -56,7 +57,7 @@ fn main() -> ! {
     let delay = Delay::new();
     delay.delay_millis(1000);
 
-    let mut mac_no = 0;
+    let mut connected_brain_addr = [0; 6];
     let mut usb = UsbSerialJtag::new(peripherals.USB_DEVICE);
     usb.write(&[0x0, 0x0, 0x0]).unwrap();
     usb.write(&7u16.to_be_bytes()).unwrap();
@@ -104,12 +105,12 @@ fn main() -> ! {
 
     loop {
         while let Some(frame) = esp_now.receive()
-            && frame.info.src_address == PEER_ADDRS[mac_no]
             && frame.data().len() == core::mem::size_of::<MessagePacket>() + 1
         {
+            let sender = frame.info;
             let frame = frame.data();
             // usb_println!("{:?}", frame);
-            if frame[0] == 0x00 {
+            if frame[0] == 0x00 && sender.src_address == connected_brain_addr {
                 let msg: MessagePacket = bytemuck::pod_read_unaligned(&frame[1..]);
 
                 critical_section::with(|cs2| {
@@ -121,7 +122,7 @@ fn main() -> ! {
                         usb.flush().ok();
                     }
                 });
-            } else if frame[0] == 0x01 {
+            } else if frame[0] == 0x01 && sender.src_address == connected_brain_addr {
                 let module = TryInto::<Module>::try_into(frame[1]).unwrap();
                 let line = u16::from_be_bytes([frame[2], frame[3]]);
                 let str = str::from_utf8(&frame[4..]).unwrap();
@@ -129,6 +130,21 @@ fn main() -> ! {
                 usb_println!(
                     "BRAIN FART!!!!!! MODULE: {module} |||||||| LINE: {line} |||||||| {str}"
                 );
+            } else if frame[0] == 0x02 {
+                let shake: HandshakeInit = bytemuck::pod_read_unaligned(&frame[1..]);
+
+                critical_section::with(|cs2| {
+                    if let Some(usb) = USB_SERIAL.borrow_ref_mut(cs2).as_mut() {
+                        let len = (core::mem::size_of::<HandshakeInit>()
+                            + core::mem::size_of::<[u8; 6]>())
+                            as u16;
+                        usb.write(&[SCAN, SCAN]).ok();
+                        usb.write(&len.to_be_bytes()).ok();
+                        usb.write(bytemuck::bytes_of(&shake)).ok();
+                        usb.write(&sender.src_address).ok();
+                        usb.flush().ok();
+                    }
+                });
             }
         }
 
@@ -139,38 +155,49 @@ fn main() -> ! {
                     core::mem::size_of::<CommandPacket>(),
                     &[&[0], bytemuck::bytes_of(&cmd)].concat()
                 );
-                if cmd.mac_no != 0 {
-                    mac_no = cmd.mac_no as usize - 1;
-                    None
+                if cmd.connect_to_mac != connected_brain_addr {
+                    if cmd.connect_to_mac != [0; 6] {
+                        connected_brain_addr = cmd.connect_to_mac;
+                        let shake = HandshakeResponse {
+                            password: StaticString::new("ニャー"),
+                        };
+                        const MSG_LEN: usize = 1 + core::mem::size_of::<HandshakeResponse>();
+                        let mut send_buf = [0u8; MSG_LEN];
+                        send_buf[0] = 0x03;
+                        send_buf[1..].copy_from_slice(bytemuck::bytes_of(&shake));
+                        let waiter = esp_now.send(&connected_brain_addr, &send_buf).unwrap();
+                        Some(waiter)
+                    } else {
+                        let send_buf = [0x04];
+                        let waiter = esp_now.send(&connected_brain_addr, &send_buf).unwrap();
+                        Some(waiter)
+                    }
                 } else if let Ok(waiter) = esp_now.send(
-                    &PEER_ADDRS[mac_no],
+                    &connected_brain_addr,
                     &[&[0], bytemuck::bytes_of(&cmd)].concat(),
                 ) {
-                    usb_println!("get a 0 and sent cmd");
+                    usb_println!("successfully sent, waiting for response");
                     Some(waiter)
                 } else {
                     None
                 }
-            }
-            /*else if let Some(ctrl) = PENDING_CTRL.borrow_ref_mut(cs).take() {
-                usb_println!("{:?}", &[&[1], bytemuck::bytes_of(&ctrl)].concat());
-                if let Ok(waiter) = esp_now.send(
-                    &PEER_ADDRS[mac_no],
-                    &[&[1], bytemuck::bytes_of(&ctrl)].concat(),
-                ) {
-                    usb_println!("got a 1 and sent ctrl");
-                    Some(waiter)
-                } else {
-                    None
-                }
-            }*/
-            else {
+            } else {
                 None
             }
         }) {
             waiter.wait().unwrap();
-            usb_println!("sent");
+            usb_println!("received response");
         }
+
+        if DO_SCAN.load(Ordering::Relaxed) {
+            let waiter = esp_now.send(&esp_now::BROADCAST_ADDRESS, &[2]).unwrap();
+            waiter.wait().unwrap();
+        }
+
+        // {
+        //     waiter.wait().unwrap();
+        //     usb_println!("sent");
+        // }
 
         if start.elapsed().as_secs() >= 1 {
             start = Instant::now();
@@ -196,48 +223,33 @@ fn on_receive() {
         if let Some(usb) = USB_SERIAL.borrow_ref_mut(cs).as_mut() {
             let mut header = [0; 1];
             usb.read_exact(&mut header).ok();
-            if header[0] == 0 {
-                let mut buf = [0u8; core::mem::size_of::<CommandPacket>()];
-                usb.read_exact(&mut buf).ok();
-                let packet: &CommandPacket = bytemuck::from_bytes(&buf);
+            match header[0] {
+                0 => {
+                    let mut buf = [0u8; core::mem::size_of::<CommandPacket>()];
+                    usb.read_exact(&mut buf).ok();
+                    let packet: &CommandPacket = bytemuck::from_bytes(&buf);
 
-                *PENDING_CMD.borrow_ref_mut(cs) = Some(*packet);
+                    *PENDING_CMD.borrow_ref_mut(cs) = Some(*packet);
 
-                {
-                    let mut buf = [0u8; 50];
-                    let mut writer = BufWriter {
-                        buf: &mut buf,
-                        pos: 0,
-                    };
-                    let _ = writeln!(writer, "everythings happy :) got cmd");
-                    let len = writer.pos;
+                    {
+                        let mut buf = [0u8; 50];
+                        let mut writer = BufWriter {
+                            buf: &mut buf,
+                            pos: 0,
+                        };
+                        let _ = writeln!(writer, "everythings happy :) got cmd");
+                        let len = writer.pos;
 
-                    usb.write(&[PRINT, PRINT]).ok();
-                    usb.write(&(len as u16).to_be_bytes()).ok();
-                    usb.write(&buf[..len]).ok();
-                    usb.flush().ok();
+                        usb.write(&[PRINT, PRINT]).ok();
+                        usb.write(&(len as u16).to_be_bytes()).ok();
+                        usb.write(&buf[..len]).ok();
+                        usb.flush().ok();
+                    }
                 }
-            } else if header[0] == 1 {
-                // let mut buf = [0u8; core::mem::size_of::<ControlPacket>()];
-                // usb.read_exact(&mut buf).ok();
-                // let packet: &ControlPacket = bytemuck::from_bytes(&buf);
-                //
-                // *PENDING_CTRL.borrow_ref_mut(cs) = Some(*packet);
-                //
-                // {
-                //     let mut buf = [0u8; 50];
-                //     let mut writer = BufWriter {
-                //         buf: &mut buf,
-                //         pos: 0,
-                //     };
-                //     let _ = writeln!(writer, "everythings happy :) got ctrl");
-                //     let len = writer.pos;
-                //
-                //     usb.write(&[PRINT, PRINT]).ok();
-                //     usb.write(&(len as u16).to_be_bytes()).ok();
-                //     usb.write(&buf[..len]).ok();
-                //     usb.flush().ok();
-                // }
+                1 => {
+                    DO_SCAN.store(true, Ordering::Relaxed);
+                }
+                _ => {}
             }
             usb.reset_rx_packet_recv_interrupt();
         }

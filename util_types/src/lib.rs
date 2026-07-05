@@ -7,6 +7,7 @@ use core::{
 use bytemuck::{Pod, Zeroable};
 pub const MESSAGE: u8 = 0x01;
 pub const PRINT: u8 = 0x00;
+pub const SCAN: u8 = 0x02;
 
 #[derive(Default, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
@@ -15,16 +16,10 @@ pub struct CommandPacket {
     pub purge_interval: u32,
     pub fan_speed: u8,
     pub restart: u8,
-    pub mac_no: u8,
     pub send_wait: u8,
-    pub receivers: [u8; 2],
+    pub erm: u8,
+    pub connect_to_mac: [u8; 6],
     pub _pad: [u8; 2],
-}
-
-#[derive(Default, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-pub struct ScanPacket {
-    pub id: u64,
 }
 
 #[derive(Default, Clone, Copy, Pod, Zeroable)]
@@ -38,6 +33,12 @@ pub struct HandshakeInit {
 #[repr(C)]
 pub struct HandshakeResponse {
     pub password: StaticString<32>,
+}
+
+#[derive(Default, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+pub struct RenamePacket {
+    pub new_name: StaticString<31>,
 }
 
 #[derive(Default, Clone, Copy, Pod, Zeroable, Debug)]

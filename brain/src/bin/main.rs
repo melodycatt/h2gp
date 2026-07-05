@@ -13,6 +13,7 @@ const NAME_PART_OFF: usize = 0x9000;
 const NAME_PART_SIZE: usize = 0x6000;
 
 extern crate alloc;
+use alloc::string::String;
 use esp_backtrace as _;
 use esp_hal::delay;
 use esp_hal::gpio::{Level, Output, OutputConfig};
@@ -31,9 +32,8 @@ extern crate alloc;
 // use esp_println::println;
 >>>>>>> 738a6ad (fuck dude please)
 use esp_hal::i2c;
+use esp_nvs::Key;
 use esp_radio::esp_now::{self, PeerInfo};
-use esp_radio::wifi;
-use esp_radio::wifi::sta::StationConfig;
 use icm42688::Icm42688;
 use ina226::Ina226;
 use util_types::*;
@@ -74,7 +74,7 @@ struct State {
 
     start_time: Option<Instant>,
     receivers: [[u8; 6]; 4],
-    free_slots: u8,
+    next_free_slot: usize,
     send_wait: u8,
 }
 
@@ -103,7 +103,7 @@ fn main() -> ! {
         purge_time: 150,
         purge_interval: 20000,
         send_wait: 1,
-        free_slots: 4,
+        next_free_slot: 0,
         ..Default::default()
     };
     let mut peripherals =
@@ -126,12 +126,11 @@ fn main() -> ! {
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
-    let wifi = peripherals.WIFI;
     let station_config =
         esp_radio::wifi::Config::Station(esp_radio::wifi::sta::StationConfig::default());
     let (mut controller, interfaces) =
         esp_radio::wifi::new(peripherals.WIFI, Default::default()).unwrap();
-    controller.set_config(&station_config);
+    controller.set_config(&station_config).unwrap();
 
     let mut esp_now = interfaces.esp_now;
 
@@ -226,8 +225,10 @@ fn main() -> ! {
     let storage = esp_storage::FlashStorage::new(peripherals.FLASH);
     let mut nvs =
         esp_nvs::Nvs::new(NAME_PART_OFF, NAME_PART_SIZE, storage).expect("failed to create nvs");
+    const NS: Key = Key::from_str("identifier");
+    const KEY: Key = Key::from_str("name");
 
-    ready_led.set_high();
+    batt_led.set_high();
     let mut connected = false;
 
     loop {
@@ -269,11 +270,11 @@ fn main() -> ! {
         state.message.fc_voltage = fc_voltage;
         state.hydro_wh += (fc_voltage * fc_current) * (dt / 3600000.);
 
-        if state.message.voltage > 1. {
-            batt_led.set_high();
-        } else {
-            batt_led.set_low();
-        }
+        // if state.message.voltage > 1. {
+        //     batt_led.set_high();
+        // } else {
+        //     batt_led.set_low();
+        // }
 
         state.message.energy_wh = state.energy_wh;
         state.message.hydro_wh = state.hydro_wh;
@@ -301,29 +302,58 @@ fn main() -> ! {
 
         state.message.elapsed_time = (current_time - state.start_time.unwrap()).as_millis() as u32;
         if let Some(data) = esp_now.receive() {
+            let sender = data.info;
             let data = data.data();
-            if data[0] == 0 {
-                let command = bytemuck::pod_read_unaligned::<CommandPacket>(&data[1..]);
-                if command.restart == 1 {
-                    esp_hal::system::software_reset()
+            match data[0] {
+                0 => {
+                    let command: CommandPacket = bytemuck::pod_read_unaligned(&data[1..]);
+                    if command.restart == 1 {
+                        esp_hal::system::software_reset()
+                    }
+
+                    state.send_wait = command.send_wait;
+                    // state.receivers = command.receivers;
+                    state.fan_speed = command.fan_speed;
+                    state.purge_interval = command.purge_interval;
+                    state.purge_time = command.purge_time;
                 }
+                1 => {
+                    let scan: RenamePacket = bytemuck::pod_read_unaligned(&data[1..]);
+                    nvs.set(&NS, &KEY, scan.new_name.as_str()).unwrap();
+                }
+                2 => {
+                    let name: String = nvs.get(&NS, &KEY).unwrap();
+                    let shake = HandshakeInit {
+                        name: StaticString::new(&name),
+                        available_slots: 4 - state.next_free_slot as u8,
+                    };
+                    const MSG_LEN: usize = 1 + core::mem::size_of::<HandshakeInit>();
+                    let mut send_buf = [0u8; MSG_LEN];
+                    send_buf[0] = 0x02;
+                    send_buf[1..].copy_from_slice(bytemuck::bytes_of(&shake));
 
-                state.send_wait = command.send_wait;
-                // state.receivers = command.receivers;
-                state.fan_speed = command.fan_speed;
-                state.purge_interval = command.purge_interval;
-                state.purge_time = command.purge_time;
-            }
-            if data[1] == 1 {
-                let scan = bytemuck::pod_read_unaligned::<ScanPacket>(&data[1..]);
-
-                nvs.set("my_key", &b"meow")?;
-                let data: [u8; 32] = nvs.get("my_key")?;
-                let shake = HandshakeInit {
-                    name: todo!(),
-                    available_slots: todo!(),
-                };
-                // esp_now.send(dst_addr, data);
+                    esp_now
+                        .send(&sender.src_address, &send_buf)
+                        .unwrap()
+                        .wait()
+                        .unwrap();
+                }
+                3 => {
+                    let res: HandshakeResponse = bytemuck::pod_read_unaligned(&data[1..]);
+                    if res.password.as_str() == "ニャー" && state.next_free_slot < 4 {
+                        state.receivers[state.next_free_slot] = sender.src_address;
+                    }
+                }
+                4 => {
+                    if let Some(addr) = state
+                        .receivers
+                        .iter_mut()
+                        .find(|s| **s == sender.src_address)
+                    {
+                        *addr = [0; 6];
+                    }
+                }
+                _ => {}
             }
         }
         state.message.free_heap = esp_alloc::HEAP.free() as u32;
@@ -331,30 +361,32 @@ fn main() -> ! {
         let mut send_buf = [0u8; MSG_LEN];
         send_buf[0] = 0x00;
         send_buf[1..].copy_from_slice(bytemuck::bytes_of(&state.message));
-        if state.receivers[0] != 0 {
-            if let Ok(waiter) = esp_now.send(&PEER_ADDRS[0], &send_buf)
-            // esp_now.send(&PEER_ADDRS[state.receivers[0] as usize - 1], &send_buf)
-            {
-                connect(&mut connected, true, &mut ready_led);
-                if state.send_wait != 0 {
-                    let _ = waiter.wait();
+        for i in &state.receivers {
+            if i != &[0; 6] {
+                if let Ok(waiter) = esp_now.send(i, &send_buf)
+                // esp_now.send(&PEER_ADDRS[state.receivers[0] as usize - 1], &send_buf)
+                {
+                    connect(&mut connected, true, &mut ready_led);
+                    if state.send_wait != 0 {
+                        let _ = waiter.wait();
+                    }
+                } else {
+                    connect(&mut connected, false, &mut ready_led);
                 }
-            } else {
-                connect(&mut connected, false, &mut ready_led);
             }
         }
-        if state.receivers[1] != 0 {
-            if let Ok(waiter) = esp_now.send(&PEER_ADDRS[0], &send_buf)
-            // esp_now.send(&PEER_ADDRS[state.receivers[1] as usize - 1], &send_buf)
-            {
-                connect(&mut connected, true, &mut ready_led);
-                if state.send_wait != 0 {
-                    let _ = waiter.wait();
-                }
-            } else {
-                connect(&mut connected, false, &mut ready_led);
-            }
-        }
+        // if state.receivers[1] != 0 {
+        //     if let Ok(waiter) = esp_now.send(&PEER_ADDRS[0], &send_buf)
+        //     // esp_now.send(&PEER_ADDRS[state.receivers[1] as usize - 1], &send_buf)
+        //     {
+        //         connect(&mut connected, true, &mut ready_led);
+        //         if state.send_wait != 0 {
+        //             let _ = waiter.wait();
+        //         }
+        //     } else {
+        //         connect(&mut connected, false, &mut ready_led);
+        //     }
+        // }
 
         // println!("sending!!!! {send_buf:?}");
         delay.delay_millis(1);
