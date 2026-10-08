@@ -1,0 +1,6 @@
+port = 2
+purge_time = 120
+purge_interval = 20000
+default_addr = 50
+send_wait = 0
+receivers = [4, 0]

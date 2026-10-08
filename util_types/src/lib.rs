@@ -1,6 +1,7 @@
 #![no_std]
+
 use core::{
-    fmt::{self, Write},
+    fmt::{self, Debug, Write},
     ops::Deref,
 };
 
@@ -17,19 +18,18 @@ pub struct CommandPacket {
     pub fan_speed: u8,
     pub restart: u8,
     pub send_wait: u8,
-    pub erm: u8,
     pub connect_to_mac: [u8; 6],
-    pub _pad: [u8; 2],
+    pub _pad: [u8; 3],
 }
 
-#[derive(Default, Clone, Copy, Pod, Zeroable)]
+#[derive(Default, Clone, Copy, Pod, Zeroable, Debug)]
 #[repr(C)]
 pub struct HandshakeInit {
     /// 31 to avoid padding. idk!
     pub name: StaticString<31>,
     pub available_slots: u8,
 }
-#[derive(Default, Clone, Copy, Pod, Zeroable)]
+#[derive(Default, Clone, Copy, Pod, Zeroable, Debug)]
 #[repr(C)]
 pub struct HandshakeResponse {
     pub password: StaticString<32>,
@@ -60,7 +60,8 @@ pub struct MessagePacket {
     pub hydro_wh: f32,
     pub a1_voltage: f32,
     pub free_heap: u32,
-    pub test_data: u32,
+    pub detected_zero: u16,
+    pub current_cal: u16,
 }
 
 pub struct BufWriter<'a> {
@@ -120,6 +121,12 @@ impl TryFrom<u8> for Module {
 #[repr(transparent)]
 pub struct StaticString<const LENGTH: usize> {
     pub data: [u8; LENGTH],
+}
+
+impl<const LENGTH: usize> Debug for StaticString<LENGTH> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_str().fmt(f)
+    }
 }
 impl<const LENGTH: usize> Default for StaticString<LENGTH> {
     fn default() -> Self {

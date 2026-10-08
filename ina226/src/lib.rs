@@ -215,11 +215,11 @@ impl<'b, D: DriverMode> Ina226<'b, D> {
         Ok(())
     }
 
-    fn write_register(&mut self, reg: u8, val: u16) -> Result<(), Error> {
+    pub fn write_register(&mut self, reg: u8, val: u16) -> Result<(), Error> {
         let bytes = [reg, (val >> 8) as u8, (val & 0xFF) as u8];
         self.i2c().write(self.i2c_address, &bytes)
     }
-    fn read_register(&mut self, reg: u8) -> Result<u16, Error> {
+    pub fn read_register(&mut self, reg: u8) -> Result<u16, Error> {
         let mut buf = [0u8, 0u8];
         self.i2c().write_read(self.i2c_address, &[reg], &mut buf)?;
         Ok(((buf[0] as u16) << 8) + buf[1] as u16)
@@ -423,7 +423,7 @@ impl<'b, D: DriverMode> Ina226<'b, D> {
         self.write_register(Self::MASK_EN_REG, val)
     }
 
-    /// always do this before reading measurements
+    /// in triggered mode, always do this before reading measurements and check if conv ready
     pub fn read_and_clear_flags(&mut self) -> Result<u16, Error> {
         let val = self.read_register(Self::MASK_EN_REG)?;
         self.overflow = (val >> 2) & 1 == 1;

@@ -15,27 +15,20 @@ const NAME_PART_SIZE: usize = 0x6000;
 extern crate alloc;
 use alloc::string::String;
 use esp_backtrace as _;
-use esp_hal::delay;
+use esp_hal::{Blocking, delay};
 use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::i2c::master::I2c;
 use esp_hal::main;
 use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
-<<<<<<< HEAD
 use esp_println::println;
 use icm42688::Icm42688;
 use ina226::Ina226;
 
-extern crate alloc;
-
-=======
 // use esp_println::println;
->>>>>>> 738a6ad (fuck dude please)
 use esp_hal::i2c;
 use esp_nvs::Key;
 use esp_radio::esp_now::{self, PeerInfo};
-use icm42688::Icm42688;
-use ina226::Ina226;
 use util_types::*;
 
 // todo me ina226 and icm42688 libraries
@@ -134,16 +127,16 @@ fn main() -> ! {
 
     let mut esp_now = interfaces.esp_now;
 
-    for i in &PEER_ADDRS {
-        let peer_info = PeerInfo {
-            interface: esp_now::EspNowWifiInterface::Station,
-            peer_address: *i,
-            lmk: None,
-            channel: Some(0),
-            encrypt: false,
-        };
-        esp_now.add_peer(peer_info).unwrap();
-    }
+    // for i in &PEER_ADDRS {
+    //     let peer_info = PeerInfo {
+    //         interface: esp_now::EspNowWifiInterface::Station,
+    //         peer_address: *i,
+    //         lmk: None,
+    //         channel: Some(0),
+    //         encrypt: false,
+    //     };
+    //     esp_now.add_peer(peer_info).unwrap();
+    // }
 
     /////
     ///// i2c
@@ -164,7 +157,7 @@ fn main() -> ! {
         send_error_msg(&mut esp_now, Module::FcVcInit, &e, line!());
         loop {}
     });
-    ina226.set_resistor_range(0.003, 8.).unwrap_or_else(|e| {
+    ina226.set_resistor_range(0.003, 16.).unwrap_or_else(|e| {
         send_error_msg(&mut esp_now, Module::FcVcInit, &e, line!());
         loop {}
     });
@@ -180,7 +173,7 @@ fn main() -> ! {
         send_error_msg(&mut esp_now, Module::BatVcInit, &e, line!());
         loop {}
     });
-    ina226_fc.set_resistor_range(0.003, 8.).unwrap_or_else(|e| {
+    ina226_fc.set_resistor_range(0.003, 16.).unwrap_or_else(|e| {
         send_error_msg(&mut esp_now, Module::BatVcInit, &e, line!());
         loop {}
     });
@@ -231,6 +224,9 @@ fn main() -> ! {
     batt_led.set_high();
     let mut connected = false;
 
+    let mut zero_counter_b = 0;
+    let mut zero_counter_fc = 0;
+
     loop {
         // unwrap_or_report!(imu.detect_config(), &mut esp_now, Module::Imu);
         unwrap_or_report!(imu.get_agt(), &mut esp_now, Module::Imu);
@@ -270,6 +266,22 @@ fn main() -> ! {
         state.message.fc_voltage = fc_voltage;
         state.hydro_wh += (fc_voltage * fc_current) * (dt / 3600000.);
 
+        if current == 0. {
+            zero_counter_b += 1;
+        }
+        if zero_counter_b == 15 {
+            state.message.current_cal = ina226.read_register(Ina226::<Blocking>::CAL_REG).unwrap();
+            ina226.set_resistor_range(0.003, 16.).unwrap();
+        }
+        if fc_current == 0. {
+            zero_counter_fc += 1;
+        }
+        if zero_counter_fc == 15 {
+            state.message.current_cal = ina226_fc.read_register(Ina226::<Blocking>::CAL_REG).unwrap();
+            ina226_fc.set_resistor_range(0.003, 16.).unwrap();
+        }
+
+
         // if state.message.voltage > 1. {
         //     batt_led.set_high();
         // } else {
@@ -281,13 +293,11 @@ fn main() -> ! {
         let purge_delta = (current_time - state.previous_time.unwrap()).as_millis() as u32;
         state.message.time_since_purge = purge_delta;
         if purge_delta >= state.purge_interval {
-            state.message.test_data = 1;
             state.purge_complete = false;
             valve1.set_high();
             valve2.set_high();
             state.previous_time = Some(current_time)
         } else if purge_delta >= state.purge_time && !state.purge_complete {
-            state.message.test_data = 0;
             valve1.set_low();
             valve2.set_low();
             state.purge_complete = true;
@@ -322,7 +332,8 @@ fn main() -> ! {
                     nvs.set(&NS, &KEY, scan.new_name.as_str()).unwrap();
                 }
                 2 => {
-                    let name: String = nvs.get(&NS, &KEY).unwrap();
+                    println!("og my friaking god!!! hi {:?}!", sender.src_address);
+                    let name: String = nvs.get(&NS, &KEY).unwrap_or(String::from("unnamed brain"));
                     let shake = HandshakeInit {
                         name: StaticString::new(&name),
                         available_slots: 4 - state.next_free_slot as u8,
@@ -332,16 +343,35 @@ fn main() -> ! {
                     send_buf[0] = 0x02;
                     send_buf[1..].copy_from_slice(bytemuck::bytes_of(&shake));
 
+                    let peer_info = PeerInfo {
+                        interface: esp_now::EspNowWifiInterface::Station,
+                        peer_address: sender.src_address,
+                        lmk: None,
+                        channel: Some(0),
+                        encrypt: false,
+                    };
+                    let _ = esp_now.add_peer(peer_info);
+                    println!("{:#?}", shake);
                     esp_now
                         .send(&sender.src_address, &send_buf)
                         .unwrap()
                         .wait()
                         .unwrap();
+                    println!("done")
                 }
                 3 => {
                     let res: HandshakeResponse = bytemuck::pod_read_unaligned(&data[1..]);
                     if res.password.as_str() == "ニャー" && state.next_free_slot < 4 {
+                        let peer_info = PeerInfo {
+                            interface: esp_now::EspNowWifiInterface::Station,
+                            peer_address: sender.src_address,
+                            lmk: None,
+                            channel: Some(0),
+                            encrypt: false,
+                        };
+                        let _ = esp_now.add_peer(peer_info);
                         state.receivers[state.next_free_slot] = sender.src_address;
+                        state.next_free_slot += 1;
                     }
                 }
                 4 => {
@@ -351,6 +381,8 @@ fn main() -> ! {
                         .find(|s| **s == sender.src_address)
                     {
                         *addr = [0; 6];
+                        connect(&mut connected, false, &mut ready_led);
+                        state.next_free_slot -= 1;
                     }
                 }
                 _ => {}

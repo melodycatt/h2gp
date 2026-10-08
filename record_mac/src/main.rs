@@ -42,7 +42,7 @@ fn main() {
 
     for line in stdin.lock().lines() {
         let line = line.expect("failed to read line");
-        println!("{line}"); // pass through espflash output
+        println!("{line}\r"); // pass through espflash output
 
         if let Some(mac) = parse_mac(&line) {
             if already_recorded(macs_path, mac) {

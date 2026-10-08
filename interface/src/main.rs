@@ -6,18 +6,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-<<<<<<< HEAD
 use eframe::egui::{self, IconData};
 use interface::*;
-=======
-use eframe::egui::{self, Stroke, Ui};
-use egui_plot::{Line, Plot, PlotPoints};
-use interface::{
-    config::{Config, save},
-    *,
-};
 use util_types::*;
->>>>>>> 738a6ad (fuck dude please)
 
 const MESSAGE: u8 = 0x01;
 const PRINT: u8 = 0x0;
@@ -33,18 +24,12 @@ fn main() -> eframe::Result<()> {
     raw_port.clear(serialport::ClearBuffer::All).unwrap();
     raw_port.write_data_terminal_ready(false).unwrap();
     raw_port.write_data_terminal_ready(true).unwrap();
-    // thread::sleep(Duration::from_secs(1));
 
     let port = Arc::new(Mutex::new(raw_port));
     let (msg_tx, msg_rx) = crossbeam::channel::unbounded();
+    let (scan_tx, scan_rx) = crossbeam::channel::unbounded();
     let (log_tx, log_rx) = crossbeam::channel::unbounded();
-    // let shared_msg = Arc::new(Mutex::new((
-    //     MessagePacket::default(),
-    //     vec!["nothin to report boss".to_owned()],
-    // )));
-    //let log = Arc::new(Mutex::new(Vec::new()));
 
-    // ---- Reader Thread ----
     {
         let port = Arc::clone(&port);
 
@@ -63,12 +48,11 @@ fn main() -> eframe::Result<()> {
                                 }
                                 let mut data = [0; std::mem::size_of::<MessagePacket>()];
                                 port.read_exact(&mut data).unwrap();
-                                let message: MessagePacket =
-                                    *bytemuck::from_bytes::<MessagePacket>(&data);
+                                let message: MessagePacket = *bytemuck::from_bytes(&data);
                                 msg_tx.send(message).unwrap();
                             }
                             [PRINT, PRINT] => {
-                                println!("{header:?}");
+                                // println!("{header:?}");
                                 let len = u16::from_be_bytes(header[2..4].try_into().unwrap());
                                 if len > 300 {
                                     println!("{len}");
@@ -85,6 +69,25 @@ fn main() -> eframe::Result<()> {
                                     ))
                                     .unwrap();
                                 log_len += 1;
+                            }
+                            [SCAN, SCAN] => {
+                                let len = u16::from_be_bytes(header[2..4].try_into().unwrap());
+                                if len
+                                    != (core::mem::size_of::<HandshakeInit>()
+                                        + core::mem::size_of::<[u8; 6]>())
+                                        as u16
+                                {
+                                    panic!("wrong scan packet size!");
+                                }
+                                println!("yay!");
+                                let mut data = [0; std::mem::size_of::<HandshakeInit>()];
+                                port.read_exact(&mut data).unwrap();
+                                println!("{data:?}");
+                                let message: HandshakeInit = *bytemuck::from_bytes(&data);
+                                println!("{message:#?}");
+                                let mut mac = [0; 6];
+                                port.read_exact(&mut mac).unwrap();
+                                scan_tx.send((message, mac)).unwrap();
                             }
                             _ => {}
                         }
@@ -112,7 +115,7 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "Telemetry GUI",
+        "H2GP telemetry",
         options,
         Box::new(|cc| {
             apply_theme(&cc.egui_ctx, Colors::REDBACK);
@@ -139,7 +142,6 @@ fn main() -> eframe::Result<()> {
             let app = App {
                 last_stick: 0.,
                 last_stick_net: 0.,
-                ctrl: ControlPacket::default(),
                 long_graphs: false,
                 // shared_msg,
                 msg_rx,
@@ -149,13 +151,11 @@ fn main() -> eframe::Result<()> {
                     purge_interval: conf.purge_interval,
                     fan_speed: 0,
                     restart: 0,
-                    mac_no: conf.default_addr,
-                    receivers: conf.receivers,
+                    connect_to_mac: conf.default_addr,
                     send_wait: conf.send_wait,
-                    _pad: [0; 2],
+                    _pad: [0; 3],
                 },
-                mac_no: conf.default_addr,
-                receivers: conf.receivers,
+                connected_brain: conf.default_addr,
                 send_wait: conf.send_wait != 0,
                 message_history,
                 start: Instant::now(),
@@ -177,7 +177,11 @@ fn main() -> eframe::Result<()> {
                 log: Vec::new(),
                 count: 0,
                 port_path: conf.port,
+                scan_rx,
+                scanned_brains: Vec::new(),
+                brain_rename: String::new(),
             };
+
             Ok(Box::new(app))
         }),
     )

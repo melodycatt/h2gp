@@ -1,0 +1,46 @@
+[package]
+name = "interface-backend"
+version = "1.0.0"
+edition = "2024"
+
+[package.metadata.bundle.bin.interface]
+name = "H2GP"
+identifier = "com.webpaige.h2gp"
+icon = ["./icon.jpg"]
+
+[lib]
+crate-type = ["cdylib"]
+
+
+[dependencies]
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+toml = "1.1.2"
+serde = { version = "1.0.228", features = ["serde_derive"] }
+directories = "6.0.0"
+util_types = { version = "0.1.0", path = "../util_types/" }
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4.76"
+js-sys = "0.3.103"
+console_error_panic_hook = "0.1.7"
+gloo-timers = { version = "0.4.0", features = ["futures"] }
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "console",
+  "Navigator",
+  "Serial",
+  "SerialPort",
+  "SerialPortFilter",
+  "SerialOptions",
+  "SerialOutputSignals",
+  "SerialInputSignals",
+  "SerialPortRequestOptions",
+  "SerialPortInfo",
+  "Window",
+  "ReadableStream",
+  "ReadableStreamDefaultReader",
+  "WritableStream",
+  "WritableStreamDefaultWriter",
+]

@@ -1,6 +1,6 @@
 #![no_std]
 
-use core::{f32::consts::PI, marker::PhantomData};
+use core::marker::PhantomData;
 
 use esp_hal::{
     DriverMode,
@@ -250,7 +250,7 @@ pub struct Icm42688<'a, 'i2c: 'a, D: DriverMode> {
     acc_s: [f32; 3],
     // acc_max: [f32; 3],
     // acc_min: [f32; 3],
-    gyr_bd: [f32; 3],
+    // gyr_bd: [f32; 3],
     pub gyr_b: [f32; 3],
 
     bank: u8,
@@ -337,7 +337,7 @@ impl<'a, 'b, D: DriverMode> Icm42688<'a, 'b, D> {
             gyro_fs: GyroFS::Dps2000,
             acc_b: [0.; 3],
             acc_s: [1.; 3],
-            gyr_bd: [0.; 3],
+            // gyr_bd: [0.; 3],
             gyr_b: [0.; 3],
             bank: 0,
         }

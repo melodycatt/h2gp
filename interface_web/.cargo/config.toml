@@ -1,0 +1,9 @@
+[build]
+target = "wasm32-unknown-unknown"
+rustflags = ["--cfg=web_sys_unstable_apis"]
+[check]
+target = "wasm32-unknown-unknown"
+rustflags = ["--cfg=web_sys_unstable_apis"]
+[clippy]
+target = "wasm32-unknown-unknown"
+rustflags = ["--cfg=web_sys_unstable_apis"]

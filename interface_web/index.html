@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title></title>
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <section class="connect-overlay" id="serial" >
+    <div class="connect-container outset-panel">
+      <span class="title">step 1: connect to a serial port</span>
+      <button id="connect">connect</button>
+    </div>
+  </section>
+  <section class="connect-overlay" id="wireless" style="visibility: hidden;">
+    <div class="connect-container outset-panel">
+      <span class="title">step 2: connect to a brain</span>
+      <button id="scan">scan for brains</button>
+    </div>
+  </section>
+
+  <div id="raw-data-container" class="outset-panel">
+    <div class="raw-value"><span class="label">battery voltage</span><span class="value" data-field="voltage">0.0</span></div>
+    <div class="raw-value"><span class="label">battery current</span><span class="value" data-field="current">0.0</span></div>
+    <div class="raw-value"><span class="label">battery power</span><span class="value" data-field="power">0.0</span></div>
+    <div class="raw-value"><span class="label">battery flags</span><span class="value" data-field="batt_flags">0</span></div>
+    <div class="raw-value"><span class="label">fuel cell voltage</span><span class="value" data-field="fc_voltage">0.0</span></div>
+    <div class="raw-value"><span class="label">fuel cell current</span><span class="value" data-field="fc_current">0.0</span></div>
+    <div class="raw-value"><span class="label">fuel cell power</span><span class="value" data-field="fc_power">0.0</span></div>
+    <div class="raw-value"><span class="label">fuel cell flags</span><span class="value" data-field="fc_flags">0</span></div>
+    <div class="raw-value"><span class="label">accumulated battery WH</span><span class="value" data-field="energy_wh">0.0</span></div>
+    <div class="raw-value"><span class="label">fuel cell WH</span><span class="value" data-field="hydro_wh">0.0</span></div>
+    <div class="raw-value"><span class="label">elapsed time ms</span><span class="value" data-field="elapsed_time">0</span></div>
+    <div class="raw-value"><span class="label">time since purge ms</span><span class="value" data-field="time_since_purge">0</span></div>
+    <div class="raw-value"><span class="label">free heap</span><span class="value" data-field="free_heap">0</span></div>
+    <div class="raw-value"><span class="label">detected zero</span><span class="value" data-field="detected_zero">0</span></div>
+    <div class="raw-value"><span class="label">current cal</span><span class="value" data-field="current_cal">0</span></div>
+    <div class="raw-value"></div>
+    <div class="raw-value"><span class="label">acc</span><span class="value" data-field="acc">0</span></div>
+    <div class="raw-value"><span class="label">gyr</span><span class="value" data-field="gyr">0</span></div>
+    <div class="raw-value"><span class="label">gyr</span><span class="value" data-field="gyr">0</span></div>
+    <div class="raw-value"><span class="label">imu temp</span><span class="value" data-field="temp">0</span></div>
+  </div>
+  <div id="controls" class="outset-panel">
+    <div id="sliders-cont">
+      <div class="slider">
+        <input type="range"/>
+        <label>pINT</label>
+      </div>
+      <div class="slider">
+        <input type="range"/>
+        <label>fSPD</label>
+      </div>  
+      <div class="slider">
+        <input type="range"/>
+        <label>pDUR</label>
+      </div>
+    </div>
+      <div id="checks-cont">
+        <div class="checkbox">
+          <input id="sendwaitcheck" type="checkbox">
+          <label title="brain waits for each telemetry packet to be received before sending the next one. disabling may help with laggy telemetry but can also cause some data loss" class="help">send wait</label><br>
+        </div>
+        <div class="checkbox">
+          <input id="zerocheck" type="checkbox">
+          <label title="brain *tries* to detect if any current sensor has stopped working and resets its calibration in an attempt to fix it" class="help">zero detection</label><br>
+        </div>
+      </div>
+      <div id="ctrl-buttons-cont">
+        <button id="sendcmd">update config</button><br><br><br>
+        <button id="rerec">restart receiver</button>
+        <button id="rebrn">restart brain</button>
+        <button id="rebrn">reconnect to brain</button>
+      </div>
+  </div>
+  <h1>Serial WASM Test</h1>
+  <p>Open devtools console to see logs.</p>
+  <input id="debug" type="checkbox">ebug mode</input><br><br>
+
+  <div>
+    <canvas id="mychart"></canvas>
+  </div>
+
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>

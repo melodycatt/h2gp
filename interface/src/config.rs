@@ -17,8 +17,7 @@ struct RawConfig {
     port: toml::Value,
     pub purge_time: u32,
     pub purge_interval: u32,
-    pub default_addr: u8,
-    pub receivers: [u8; 2],
+    pub default_addr: [u8; 6],
     pub send_wait: u8,
 }
 
@@ -27,8 +26,7 @@ pub struct Config {
     pub port: String,
     pub purge_time: u32,
     pub purge_interval: u32,
-    pub default_addr: u8,
-    pub receivers: [u8; 2],
+    pub default_addr: [u8; 6],
     pub send_wait: u8,
 }
 
@@ -76,7 +74,6 @@ fn parse(text: &str) -> Result<Config, String> {
         default_addr: raw.default_addr,
         purge_time: raw.purge_time,
         purge_interval: raw.purge_interval,
-        receivers: raw.receivers,
         send_wait: raw.send_wait,
     })
 }
