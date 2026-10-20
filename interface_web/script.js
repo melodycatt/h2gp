@@ -14,8 +14,9 @@ function setField(field, value) {
 }
 
 const message_buffer = [];
-      const ctx = document.getElementById('mychart');
-const chart = new Chart(ctx, {
+function newChart(chartid) {
+    const ctx = document.getElementById(chartid);
+    const chart = new Chart(ctx, {
         type: 'line',
         data: {
             datasets: [{
@@ -44,9 +45,14 @@ const chart = new Chart(ctx, {
                 y: {
                     beginAtZero: true
                 }
-            }
+            },
+            responsive: false
         }
     });
+}
+newChart('achart');
+newChart('vchart');
+newChart('smthelsechart');
 
 function send_message(new_packet) {
     msg_packet = new_packet;
@@ -190,6 +196,12 @@ async function run() {
         console.log(e.target.value);
         wasm.set_debug(e.target.value == "on");
     });
+    window.addEventListener('keydown', (e) => {
+        if (e.key == "Escape") {
+            document.getElementById("serial").style.visibility = 'hidden';
+            document.getElementById("wireless").style.visibility = 'hidden';
+        }
+    })
     window.msg_packet = new wasm.JSMessagePacket();
     console.log(msg_packet.voltage);
 }

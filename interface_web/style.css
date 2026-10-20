@@ -360,3 +360,12 @@ input[type=range]:focus::-ms-fill-lower {
 input[type=range]:focus::-ms-fill-upper {
   background: #367ebd;
 } */
+chart {
+  width: 250px;
+  height: 250px;
+  display: inline-block;
+}
+.chartcontainer {
+  display: inline-block;
+  padding: 1em;
+}
