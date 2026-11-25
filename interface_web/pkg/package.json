@@ -1,0 +1,15 @@
+{
+  "name": "interface-backend",
+  "type": "module",
+  "version": "1.0.0",
+  "files": [
+    "interface_backend_bg.wasm",
+    "interface_backend.js",
+    "interface_backend.d.ts"
+  ],
+  "main": "interface_backend.js",
+  "types": "interface_backend.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
