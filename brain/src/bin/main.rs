@@ -15,14 +15,14 @@ const NAME_PART_SIZE: usize = 0x6000;
 extern crate alloc;
 use alloc::string::String;
 use esp_backtrace as _;
-use esp_hal::{Blocking, delay};
 use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::i2c::master::I2c;
 use esp_hal::main;
 use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{Blocking, delay};
 use esp_println::println;
-use icm42688::Icm42688;
+// use icm42688::Icm42688;
 use ina226::Ina226;
 
 // use esp_println::println;
@@ -92,6 +92,8 @@ macro_rules! unwrap_or_report {
 )]
 #[main]
 fn main() -> ! {
+    println!("{PEER_ADDRS:?}");
+    // panic!("aaa");
     let mut state = State {
         purge_time: 150,
         purge_interval: 20000,
@@ -173,10 +175,12 @@ fn main() -> ! {
         send_error_msg(&mut esp_now, Module::BatVcInit, &e, line!());
         loop {}
     });
-    ina226_fc.set_resistor_range(0.003, 16.).unwrap_or_else(|e| {
-        send_error_msg(&mut esp_now, Module::BatVcInit, &e, line!());
-        loop {}
-    });
+    ina226_fc
+        .set_resistor_range(0.003, 16.)
+        .unwrap_or_else(|e| {
+            send_error_msg(&mut esp_now, Module::BatVcInit, &e, line!());
+            loop {}
+        });
     ina226_fc
         .wait_until_conversion_completed()
         .unwrap_or_else(|e| {
@@ -185,13 +189,13 @@ fn main() -> ! {
         });
 
     //
-    // imu
+    // imu THIS IS IMU STUFF
     //
-    let mut imu = Icm42688::new(&i2c, 0x68);
-    imu.begin().unwrap_or_else(|e| {
-        send_error_msg(&mut esp_now, Module::ImuInit, &e, line!());
-        loop {}
-    });
+    // let mut imu = Icm42688::new(&i2c, 0b0110110);
+    // imu.begin().unwrap_or_else(|e| {
+    //     send_error_msg(&mut esp_now, Module::ImuInit, &e, line!());
+    //     loop {}
+    // });
 
     let _fan = Output::new(
         peripherals.GPIO8.reborrow(),
@@ -229,12 +233,17 @@ fn main() -> ! {
 
     loop {
         // unwrap_or_report!(imu.detect_config(), &mut esp_now, Module::Imu);
-        unwrap_or_report!(imu.get_agt(), &mut esp_now, Module::Imu);
-        let acc = imu.acc();
-        let gyr = imu.gyr();
-        state.message.gyr = gyr;
-        state.message.acc = acc;
-        state.message.temp = imu.temp();
+
+        // THIS IS IMU STUFF
+        // unwrap_or_report!(imu.get_agt(), &mut esp_now, Module::Imu);
+        // let acc = imu.acc();
+        // let gyr = imu.gyr();
+        // state.message.gyr = gyr;
+        // state.message.acc = acc;
+        // state.message.temp = imu.temp();
+        state.message.gyr = [0., 0., 0.];
+        state.message.acc = [0., 0., 0.];
+        state.message.temp = 0.;
         let current_time = Instant::now();
         let dt = (current_time - state.last_sample_ms.unwrap()).as_micros() as f32 / 1000.;
         state.last_sample_ms = Some(current_time);
@@ -277,10 +286,11 @@ fn main() -> ! {
             zero_counter_fc += 1;
         }
         if zero_counter_fc == 15 {
-            state.message.current_cal = ina226_fc.read_register(Ina226::<Blocking>::CAL_REG).unwrap();
+            state.message.current_cal = ina226_fc
+                .read_register(Ina226::<Blocking>::CAL_REG)
+                .unwrap();
             ina226_fc.set_resistor_range(0.003, 16.).unwrap();
         }
-
 
         // if state.message.voltage > 1. {
         //     batt_led.set_high();
@@ -442,6 +452,7 @@ fn send_error_msg<E: core::fmt::Debug>(
     err: &E,
     line: u32,
 ) {
+    println!("we errored {:?}, {:?}, {:?}", module, line, err);
     use core::fmt::Write;
     // println!("{:?} {:?} {:?}", module, line, err);
     // [ module | line_lo | line_hi | len | utf8 bytes... ]

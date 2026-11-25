@@ -63,7 +63,10 @@ fn main() -> ! {
     let mut usb = UsbSerialJtag::new(peripherals.USB_DEVICE);
     {
         let mut buf = [0u8; 516]; // big enough for MessagePacket debug
-        let mut writer = BufWriter { buf: &mut buf, pos: 4 };
+        let mut writer = BufWriter {
+            buf: &mut buf,
+            pos: 4,
+        };
         let _ = writeln!(&mut writer, "fuck uy");
         let len = writer.pos;
         buf[0] = PRINT;
@@ -99,16 +102,16 @@ fn main() -> ! {
     controller.start().unwrap();
 
     let mut esp_now = interfaces.esp_now;
-    for i in PEER_ADDRS.iter() {
-        let peer_info = PeerInfo {
-            interface: esp_now::EspNowWifiInterface::Sta,
-            peer_address: *i,
-            lmk: None,
-            channel: Some(0),
-            encrypt: false,
-        };
-        esp_now.add_peer(peer_info).unwrap();
-    }
+    // for i in PEER_ADDRS.iter() {
+    //     let peer_info = PeerInfo {
+    //         interface: esp_now::EspNowWifiInterface::Sta,
+    //         peer_address: *i,
+    //         lmk: None,
+    //         channel: Some(0),
+    //         encrypt: false,
+    //     };
+    //     esp_now.add_peer(peer_info).unwrap();
+    // }
 
     let mut start = Instant::now();
     let mut start2 = Instant::now();
@@ -194,6 +197,20 @@ fn main() -> ! {
                         let mut send_buf = [0u8; MSG_LEN];
                         send_buf[0] = 0x03;
                         send_buf[1..].copy_from_slice(bytemuck::bytes_of(&shake));
+
+                        let peer_info = PeerInfo {
+                            interface: esp_now::EspNowWifiInterface::Sta,
+                            peer_address: connected_brain_addr,
+                            lmk: None,
+                            channel: Some(0),
+                            encrypt: false,
+                        };
+                        match esp_now.add_peer(peer_info) {
+                            Ok(())
+                            | Err(esp_now::EspNowError::Error(esp_now::Error::PeerExists)) => {}
+                            e => e.unwrap(),
+                        };
+
                         let waiter = esp_now.send(&connected_brain_addr, &send_buf).unwrap();
                         Some(waiter)
                     } else {
